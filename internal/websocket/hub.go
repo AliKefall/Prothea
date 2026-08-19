@@ -74,3 +74,24 @@ func (h *Hub) unregisterClient(
 }
 
 
+// If user  have more than one websocket connection this one sends this to every last one of them
+// Absolutely unnecessary right now I am still testing this and gonna need it soon enough.
+func (h *Hub) SendToUser(
+	userID string,
+	event Event,
+) error {
+	h.mu.RLock()
+
+	defer h.mu.RUnlock()
+
+	for client := range h.clients {
+		if client.UserID != userID {
+			continue
+		}
+
+		if err := client.SendEvent(event); err != nil {
+			return err
+		}
+	}
+	return nil
+}
