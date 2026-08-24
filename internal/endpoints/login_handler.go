@@ -15,7 +15,7 @@ import (
 )
 
 type LoginRequest struct {
-	Username string `json:"username"`
+	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
@@ -27,12 +27,12 @@ func (deps *Deps) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	utils.DecodeJSON(w, r, req)
 
-	if req.Username == "" || req.Password == "" {
+	if req.Email == "" || req.Password == "" {
 		utils.RespondWithError(w, http.StatusBadRequest, "login_error", "Username and password are required", "", nil)
 		return
 	}
 
-	user, err := deps.Queries.GetUserByUsername(ctx, req.Username)
+	user, err := deps.Queries.GetUserByEmail(ctx, req.Email)
 	if err != nil {
 		utils.RespondWithError(w, http.StatusUnauthorized, "login_error", "User could not be found", "", err)
 		return

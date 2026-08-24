@@ -373,6 +373,14 @@ func (deps *Deps) HandleAcceptFriendRequest(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
+
+	utils.RespondWithJSON(
+    w,
+    http.StatusOK,
+    map[string]string{
+        "message": "friend request accepted",
+    },
+)
 }
 
 func (deps *Deps) HandleRejectFriendRequest(w http.ResponseWriter, r *http.Request) {

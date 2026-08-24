@@ -109,7 +109,7 @@ SELECT EXISTS (
     SELECT 1
     FROM friend_requests
     WHERE
-        (requester_id = $1 AND target_id $2)
+        (requester_id = $1 AND target_id = $2)
         OR
         (requester_id = $2 AND target_id = $1)
 )
@@ -117,11 +117,11 @@ SELECT EXISTS (
 
 type FriendRequestExistsParams struct {
 	RequesterID uuid.UUID
-	Column2     interface{}
+	TargetID    uuid.UUID
 }
 
 func (q *Queries) FriendRequestExists(ctx context.Context, arg FriendRequestExistsParams) (bool, error) {
-	row := q.db.QueryRowContext(ctx, friendRequestExists, arg.RequesterID, arg.Column2)
+	row := q.db.QueryRowContext(ctx, friendRequestExists, arg.RequesterID, arg.TargetID)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
