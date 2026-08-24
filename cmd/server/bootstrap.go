@@ -6,9 +6,12 @@ import (
 	"log"
 	"time"
 
+	"github.com/AliKefall/prothea/internal/auth"
 	"github.com/AliKefall/prothea/internal/chat"
 	"github.com/AliKefall/prothea/internal/database"
 	"github.com/AliKefall/prothea/internal/endpoints"
+	"github.com/AliKefall/prothea/internal/friends"
+	"github.com/AliKefall/prothea/internal/matchmaking"
 	"github.com/AliKefall/prothea/internal/websocket"
 	"github.com/redis/go-redis/v9"
 )
@@ -26,15 +29,37 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 
 	redisClient := NewRedisClient(config.RedisURL)
 
-	chatService := chat.NewService(conn, queries)
+	hub := websocket.NewHub()
 
+	chatService := chat.NewService(hub)
+	hub.Register(websocket.EventChatSend, chatService.HandleSendMessage)
+
+	deps := &endpoints.Deps{
+		DB:          conn,
+		Queries:     queries,
+		RedisClient: redisClient,
+		Hasher:      auth.NewPasswordHasher(),
+		JWT:         auth.NewJWTManager(config.JWTSecret, 15*time.Minute),
+		Friends:     friends.NewService(conn, queries),
+		Matchmaking: matchmaking.NewMatchmakingService(redisClient),
+		Hub:         hub,
+	}
+
+	return conn, serverDependencies{
+		deps:    deps,
+		queries: queries,
+		hub:     hub,
+		redis:   redisClient,
+	}
 }
 
-
 func mustOpenDatabase(config *ServerConfig) *sql.DB {
-	dbUrl := config.DBUrl
+	dbURL := config.DBUrl
+	if dbURL == "" {
+		log.Fatal("database url is required")
+	}
 
-	conn, err := sql.Open("pgx", dbUrl)
+	conn, err := sql.Open("pgx", dbURL)
 	if err != nil {
 		log.Fatalf("database connection error: %v", err)
 	}

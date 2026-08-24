@@ -5,21 +5,21 @@ import (
 	"strings"
 )
 
-type ServerConfig struct{
-	DBUrl string
-	JWTSecret string
-	Port string
+type ServerConfig struct {
+	DBUrl          string
+	JWTSecret      string
+	Port           string
 	AllowedOrigins []string
-	RedisURL string
+	RedisURL       string
 }
 
-func NewServer() *ServerConfig{
-	allowedOrigins := []string {
+func NewServer() *ServerConfig {
+	allowedOrigins := []string{
 		"http://localhost:3000",
 		"http://192.168.1.12:3000",
 	}
 
-	if value := os.Getenv("CORS_ALLOWED_ORIGINS"); value != ""{
+	if value := os.Getenv("CORS_ALLOWED_ORIGINS"); value != "" {
 		parts := strings.Split(value, ",")
 		allowedOrigins = make([]string, 0, len(parts))
 		for _, origin := range parts {
@@ -29,10 +29,17 @@ func NewServer() *ServerConfig{
 	}
 
 	return &ServerConfig{
-		DBUrl: os.Getenv("DATABASE_URL"),
-		JWTSecret: os.Getenv("JWT_SECRET"),
-		Port: os.Getenv("PORT"),
+		DBUrl:          os.Getenv("DATABASE_URL"),
+		JWTSecret:      os.Getenv("JWT_SECRET"),
+		Port:           defaultString(os.Getenv("PORT"), "8080"),
 		AllowedOrigins: allowedOrigins,
-		RedisURL: os.Getenv("REDIS_URL"),
+		RedisURL:       os.Getenv("REDIS_URL"),
 	}
+}
+
+func defaultString(value string, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }

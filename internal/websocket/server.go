@@ -64,7 +64,6 @@ func ServeWS(
 
 	select {
 	case hub.register <- client:
-		hub.registerClient(client)
 	case <-time.After(3 * time.Second):
 		log.Printf("ws register timeout user=%s", username)
 		conn.Close()

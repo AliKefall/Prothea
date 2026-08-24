@@ -8,7 +8,6 @@ func (h *Hub) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case client := <-h.register:
-			h.registerClient(client)
 		case client := <-h.unregister:
 			h.unregisterClient(client)
 		case in := <-h.inbound:

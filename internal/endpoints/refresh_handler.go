@@ -32,7 +32,7 @@ func (deps *Deps) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 	refreshHash := hex.EncodeToString(hash[:])
 
 	blacklisted, err := deps.RedisClient.Get(ctx, "bl:"+refreshHash).Result()
-	if err != nil && errors.Is(err, redis.Nil) {
+	if err != nil && !errors.Is(err, redis.Nil) {
 		utils.RespondWithError(w, http.StatusInternalServerError, "redis_error", "Redis read failed", "", err)
 		return
 	}
@@ -131,18 +131,18 @@ func (deps *Deps) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ttl := time.Until(newExpires)
-	deps.RedisClient.Set(ctx, "bl:" + refreshHash, "1", ttl)
-	deps.RedisClient.Del(ctx, "sess:" + refreshHash)
-	deps.RedisClient.Set(ctx, "sess:" + newRefreshHash, session.UserID.String(), ttl)
+	deps.RedisClient.Set(ctx, "bl:"+refreshHash, "1", ttl)
+	deps.RedisClient.Del(ctx, "sess:"+refreshHash)
+	deps.RedisClient.Set(ctx, "sess:"+newRefreshHash, session.UserID.String(), ttl)
 
 	http.SetCookie(w, &http.Cookie{
-		Name: "refresh_token",
-		Value: newRefresh,
+		Name:     "refresh_token",
+		Value:    newRefresh,
 		HttpOnly: true,
-		Secure: utils.ShouldUseSecureCookie(r),
+		Secure:   utils.ShouldUseSecureCookie(r),
 		SameSite: http.SameSiteLaxMode,
-		Path: "/",
-		Expires: newExpires,
+		Path:     "/",
+		Expires:  newExpires,
 	})
 
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{

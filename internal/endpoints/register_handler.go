@@ -20,7 +20,7 @@ type RegisterRequest struct {
 	Password string `json:"password"`
 }
 
-func (deps *Deps) HandlerRegister(w http.ResponseWriter, r *http.Request) {
+func (deps *Deps) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
@@ -96,8 +96,6 @@ func (deps *Deps) HandlerRegister(w http.ResponseWriter, r *http.Request) {
 		utils.RespondWithError(w, http.StatusInternalServerError, "rating_error", "user ratings could not be created", "", err)
 		return
 	}
-
-	tx.Commit()
 
 	if err := tx.Commit(); err != nil {
 		utils.RespondWithError(w, http.StatusInternalServerError, "transaction_error", "Commit failed", "", err)
