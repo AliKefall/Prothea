@@ -3,9 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"log"
-	"time"
-
 	"github.com/AliKefall/prothea/internal/auth"
 	"github.com/AliKefall/prothea/internal/chat"
 	"github.com/AliKefall/prothea/internal/database"
@@ -13,7 +10,10 @@ import (
 	"github.com/AliKefall/prothea/internal/friends"
 	"github.com/AliKefall/prothea/internal/matchmaking"
 	"github.com/AliKefall/prothea/internal/websocket"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/redis/go-redis/v9"
+	"log"
+	"time"
 )
 
 type serverDependencies struct {
@@ -40,7 +40,7 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 		RedisClient: redisClient,
 		Hasher:      auth.NewPasswordHasher(),
 		JWT:         auth.NewJWTManager(config.JWTSecret, 15*time.Minute),
-		Friends:     friends.NewService(conn, queries),
+		Friends:     friends.NewService(conn, queries, hub),
 		Matchmaking: matchmaking.NewMatchmakingService(redisClient),
 		Hub:         hub,
 	}

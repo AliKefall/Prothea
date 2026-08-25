@@ -2,12 +2,13 @@ package ratelimiter
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
-	"time"
-
 	"github.com/redis/go-redis/v9"
+	"time"
 )
 
+//go:embed lua/token_bucket.lua
 var tokenBucketLua string
 
 type RedisTokenBucketLimiter struct {
@@ -53,7 +54,7 @@ func (l *RedisTokenBucketLimiter) Allow(ctx context.Context, key string, now tim
 		int64(l.ttl.Seconds()),
 	).Int()
 	if err != nil {
-		return false, fmt.Errorf("ratelimiter: script failed for key %q: %w", key, err )
+		return false, fmt.Errorf("ratelimiter: script failed for key %q: %w", key, err)
 
 	}
 	return result == 1, nil

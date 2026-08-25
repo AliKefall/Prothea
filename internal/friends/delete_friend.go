@@ -32,3 +32,7 @@ func (s *Service) DeleteFriend(
 
 	return nil
 }
+
+func (s *Service) DeleteFriendEvent(friendID uuid.UUID) error {
+	return nil
+}

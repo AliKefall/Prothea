@@ -140,7 +140,7 @@ func (deps *Deps) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 		Value:    newRefresh,
 		HttpOnly: true,
 		Secure:   utils.ShouldUseSecureCookie(r),
-		SameSite: http.SameSiteLaxMode,
+		SameSite: http.SameSiteNoneMode,
 		Path:     "/",
 		Expires:  newExpires,
 	})
@@ -160,7 +160,7 @@ func clearRefreshToken(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   secureCookie,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: http.SameSiteNoneMode,
 	})
 
 }

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/AliKefall/prothea/internal/auth"
@@ -25,22 +26,71 @@ func (deps *Deps) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	var req LoginRequest
 
-	utils.DecodeJSON(w, r, req)
+	if err := utils.DecodeJSON(w, r, &req); err != nil {
+		return
+	}
+
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 
 	if req.Email == "" || req.Password == "" {
-		utils.RespondWithError(w, http.StatusBadRequest, "login_error", "Username and password are required", "", nil)
+		utils.RespondWithError(
+			w,
+			http.StatusBadRequest,
+			"login_error",
+			"Email and password are required",
+			"",
+			nil,
+		)
 		return
 	}
 
 	user, err := deps.Queries.GetUserByEmail(ctx, req.Email)
 	if err != nil {
-		utils.RespondWithError(w, http.StatusUnauthorized, "login_error", "User could not be found", "", err)
+		if err == sql.ErrNoRows {
+			utils.RespondWithError(
+				w,
+				http.StatusUnauthorized,
+				"login_error",
+				"Invalid credentials",
+				"",
+				nil,
+			)
+			return
+		}
+
+		utils.RespondWithError(
+			w,
+			http.StatusInternalServerError,
+			"database_error",
+			"Failed to load user",
+			"",
+			err,
+		)
 		return
 	}
 
 	ok, err := deps.Hasher.Verify(req.Password, user.Password)
-	if !ok || err != nil {
-		utils.RespondWithError(w, http.StatusUnauthorized, "login_error", "Invalid credentials", "", err)
+	if err != nil {
+		utils.RespondWithError(
+			w,
+			http.StatusInternalServerError,
+			"auth_error",
+			"Failed to verify credentials",
+			"",
+			err,
+		)
+		return
+	}
+
+	if !ok {
+		utils.RespondWithError(
+			w,
+			http.StatusUnauthorized,
+			"login_error",
+			"Invalid credentials",
+			"",
+			nil,
+		)
 		return
 	}
 
@@ -55,66 +105,113 @@ func (deps *Deps) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	sessionID := uuid.New()
 
 	refreshToken, err := auth.MakeRefreshToken()
-
 	if err != nil {
-		utils.RespondWithError(w, http.StatusInternalServerError, "refresh_error", "Failed to create refresh token", "", err)
+		utils.RespondWithError(
+			w,
+			http.StatusInternalServerError,
+			"refresh_error",
+			"Failed to create refresh token",
+			"",
+			err,
+		)
 		return
 	}
 
 	hash := sha256.Sum256([]byte(refreshToken))
 	refreshHash := hex.EncodeToString(hash[:])
 
-	_, err = deps.Queries.CreateSession(ctx, database.CreateSessionParams{
-		ID:               sessionID,
-		UserID:           user.ID,
-		RefreshTokenHash: refreshHash,
-		UserAgent: sql.NullString{
-			String: r.UserAgent(),
-			Valid:  true,
+	_, err = deps.Queries.CreateSession(
+		ctx,
+		database.CreateSessionParams{
+			ID:               sessionID,
+			UserID:           user.ID,
+			RefreshTokenHash: refreshHash,
+			UserAgent: sql.NullString{
+				String: r.UserAgent(),
+				Valid:  true,
+			},
+			IpAddress: sql.NullString{
+				String: utils.GetClientIP(r),
+				Valid:  true,
+			},
+			CreatedAt:    now,
+			ExpiresAt:    refreshExpires,
+			MaxExpiresAt: maxExpires,
+			LastUsedAt: sql.NullTime{
+				Time:  now,
+				Valid: true,
+			},
 		},
-		IpAddress: sql.NullString{
-			String: utils.GetClientIP(r),
-			Valid:  true,
-		},
-		CreatedAt:    now,
-		ExpiresAt:    refreshExpires,
-		MaxExpiresAt: maxExpires,
-		LastUsedAt: sql.NullTime{
-			Time:  now,
-			Valid: true,
-		},
-	})
-
+	)
 	if err != nil {
-		utils.RespondWithError(w, http.StatusInternalServerError, "session_error", "Failed to create session", "", err)
+		utils.RespondWithError(
+			w,
+			http.StatusInternalServerError,
+			"session_error",
+			"Failed to create session",
+			"",
+			err,
+		)
 		return
 	}
 
-	accessToken, err := deps.JWT.Generate(user.ID.String(), sessionID.String())
-
+	accessToken, err := deps.JWT.Generate(
+		user.ID.String(),
+		sessionID.String(),
+	)
 	if err != nil {
-		utils.RespondWithError(w, http.StatusInternalServerError, "jwt_error", "Faield to create access token", "", err)
+		utils.RespondWithError(
+			w,
+			http.StatusInternalServerError,
+			"jwt_error",
+			"Failed to create access token",
+			"",
+			err,
+		)
 		return
 	}
 
-	deps.RedisClient.Set(ctx, "sess:"+refreshHash, user.ID.String(), refreshTTL)
+	if err := deps.RedisClient.Set(
+		ctx,
+		"sess:"+refreshHash,
+		user.ID.String(),
+		refreshTTL,
+	).Err(); err != nil {
+		utils.RespondWithError(
+			w,
+			http.StatusInternalServerError,
+			"session_error",
+			"Failed to store session",
+			"",
+			err,
+		)
+		return
+	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
-		Value:    refreshToken,
-		HttpOnly: true,
-		Secure:   utils.ShouldUseSecureCookie(r),
-		SameSite: http.SameSiteLaxMode,
-		Path:     "/",
-		Expires:  refreshExpires,
-	})
-
-	utils.RespondWithJSON(w, http.StatusOK, map[string]any{
-		"access_token": accessToken,
-		"user": map[string]string{
-			"user_id":  user.ID.String(),
-			"username": user.Username,
-			"email":    user.Email,
+	http.SetCookie(
+		w,
+		&http.Cookie{
+			Name:     "refresh_token",
+			Value:    refreshToken,
+			HttpOnly: true,
+			Secure:   utils.ShouldUseSecureCookie(r),
+			SameSite: http.SameSiteNoneMode, // NOTE: Don't forget to change this in prod
+			Path:     "/",
+			Expires:  refreshExpires,
+			MaxAge:   int(refreshTTL.Seconds()),
 		},
-	})
+	)
+
+	utils.RespondWithJSON(
+		w,
+		http.StatusOK,
+		map[string]any{
+			"access_token": accessToken,
+			"user": map[string]string{
+				"user_id":  user.ID.String(),
+				"username": user.Username,
+				"email":    user.Email,
+			},
+		},
+	)
 }

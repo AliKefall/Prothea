@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS friendships (
     CHECK (user_id < friend_id)
 );
 
-CREATE TABLE IF NOT EXISTS friend_requests(
+CREATE TABLE IF NOT EXISTS friend_requests (
     requester_id UUID NOT NULL,
     target_id UUID NOT NULL,
 
@@ -25,15 +25,15 @@ CREATE TABLE IF NOT EXISTS friend_requests(
 
     PRIMARY KEY (requester_id, target_id),
 
-    FOREIGN KEY(requester_id)
+    FOREIGN KEY (requester_id)
         REFERENCES users(id)
         ON DELETE CASCADE,
 
-    FOREIGN KEY(friend_id)
+    FOREIGN KEY (target_id)
         REFERENCES users(id)
         ON DELETE CASCADE,
 
-    CHECK (user_id < friend_id)
+    CHECK (requester_id <> target_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_friendship_friend_id

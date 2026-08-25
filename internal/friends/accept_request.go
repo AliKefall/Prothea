@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/AliKefall/prothea/internal/database"
+	"github.com/AliKefall/prothea/internal/websocket"
 	"github.com/google/uuid"
 )
 
@@ -60,5 +61,10 @@ func (s *Service) AcceptFriendRequest(
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+
 	return nil
+}
+
+func (s *Service) AcceptFriendRequestEvent(ctx context.Context, accepterID uuid.UUID) {
+
 }
