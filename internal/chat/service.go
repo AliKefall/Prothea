@@ -6,21 +6,25 @@ import (
 	"errors"
 
 	"github.com/AliKefall/prothea/internal/database"
+	"github.com/AliKefall/prothea/internal/websocket"
 	"github.com/google/uuid"
 )
 
-type Service struct{
-	db *sql.DB
+type Service struct {
+	db      *sql.DB
 	queries *database.Queries
+	hub     *websocket.Hub
 }
 
 func NewService(
 	db *sql.DB,
 	queries *database.Queries,
+	hub *websocket.Hub,
 ) *Service {
 	return &Service{
-		db: db,
+		db:      db,
 		queries: queries,
+		hub:     hub,
 	}
 }
 
@@ -30,12 +34,12 @@ func (s *Service) getOrCreateDirectConversation(
 	userB uuid.UUID,
 ) (database.Conversation, error) {
 	if userA == userB {
-		return database.Conversation{}, errors.New("can not create conversation with yourself")
+		return database.Conversation{}, ErrCannotMessageSelf
 
 	}
 
 	conversation, err := s.queries.FindDirectConversation(ctx, database.FindDirectConversationParams{
-		UserID: userA,
+		UserID:   userA,
 		UserID_2: userB,
 	})
 
@@ -52,7 +56,7 @@ func (s *Service) getOrCreateDirectConversation(
 		return database.Conversation{}, err
 	}
 
-	defer func(){
+	defer func() {
 		_ = tx.Rollback()
 	}()
 
@@ -61,7 +65,7 @@ func (s *Service) getOrCreateDirectConversation(
 	conversationID := uuid.New()
 
 	conversation, err = qtx.CreateConversation(ctx, database.CreateConversationParams{
-		ID: conversationID,
+		ID:   conversationID,
 		Type: "direct",
 	})
 
@@ -71,21 +75,14 @@ func (s *Service) getOrCreateDirectConversation(
 
 	if _, err := qtx.AddConversationMember(ctx, database.AddConversationMemberParams{
 		ConversationID: conversationID,
-		UserID: userA,
+		UserID:         userA,
 	}); err != nil {
 		return database.Conversation{}, err
 	}
 
 	if _, err := qtx.AddConversationMember(ctx, database.AddConversationMemberParams{
 		ConversationID: conversationID,
-		UserID: userA,
-	}); err != nil {
-		return database.Conversation{}, err
-	}
-
-	if _, err := qtx.AddConversationMember(ctx, database.AddConversationMemberParams{
-		ConversationID: conversationID,
-		UserID: userB,
+		UserID:         userB,
 	}); err != nil {
 		return database.Conversation{}, err
 	}

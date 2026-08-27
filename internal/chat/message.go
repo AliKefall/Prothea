@@ -10,9 +10,10 @@ import (
 )
 
 var (
-	ErrUsersAreNotFriends = errors.New("users are not friend")
+	ErrUsersAreNotFriends = errors.New("users are not friends")
 	ErrEmptyMessage       = errors.New("message is empty")
 	ErrMessageTooLong     = errors.New("message is too long")
+	ErrCannotMessageSelf  = errors.New("cannot send message to yourself")
 )
 
 const MaxMessageLength = 500
@@ -30,7 +31,11 @@ func (s *Service) SendMessage(
 	}
 
 	if len(content) > MaxMessageLength {
-		return database.Message{}, ErrEmptyMessage
+		return database.Message{}, ErrMessageTooLong
+	}
+
+	if senderID == recipientID {
+		return database.Message{}, ErrCannotMessageSelf
 	}
 
 	a, b := normalizeFriend(senderID, recipientID)

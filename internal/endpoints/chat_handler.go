@@ -2,6 +2,7 @@ package endpoints
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/AliKefall/prothea/internal/database"
@@ -26,14 +27,17 @@ type ConversationResponse struct {
 }
 
 func toChatMessageReponse(m database.Message) ChatMessageResponse {
-	return ChatMessageResponse{
+	response := ChatMessageResponse{
 		ID:             m.ID.String(),
 		ConversationID: m.ConversationID.String(),
 		SenderID:       m.SenderID.String(),
 		Content:        m.Content,
 		CreatedAt:      m.CreatedAt,
-		EditedAt:       &m.EditedAt.Time,
 	}
+	if m.EditedAt.Valid {
+		response.EditedAt = &m.EditedAt.Time
+	}
+	return response
 }
 
 func toConversationResponse(c database.Conversation) ConversationResponse {
@@ -129,11 +133,13 @@ func (deps *Deps) HandleConversationMessages(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	limit, offset := parsePagination(r, 50, 100)
+
 	messages, err := deps.Chat.GetMessages(
 		r.Context(),
 		conversationID,
-		50,
-		0,
+		limit,
+		offset,
 	)
 
 	if err != nil {
@@ -155,4 +161,25 @@ func (deps *Deps) HandleConversationMessages(w http.ResponseWriter, r *http.Requ
 	}
 
 	utils.RespondWithJSON(w, http.StatusOK, response)
+}
+
+func parsePagination(r *http.Request, defaultLimit int32, maxLimit int32) (int32, int32) {
+	limit := defaultLimit
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.ParseInt(raw, 10, 32); err == nil && parsed > 0 {
+			limit = int32(parsed)
+		}
+	}
+	if limit > maxLimit {
+		limit = maxLimit
+	}
+
+	var offset int32
+	if raw := r.URL.Query().Get("offset"); raw != "" {
+		if parsed, err := strconv.ParseInt(raw, 10, 32); err == nil && parsed > 0 {
+			offset = int32(parsed)
+		}
+	}
+
+	return limit, offset
 }

@@ -23,7 +23,10 @@ func NewServer() *ServerConfig {
 		parts := strings.Split(value, ",")
 		allowedOrigins = make([]string, 0, len(parts))
 		for _, origin := range parts {
-			allowedOrigins = append(allowedOrigins, origin)
+			origin = strings.TrimSpace(origin)
+			if origin != "" {
+				allowedOrigins = append(allowedOrigins, origin)
+			}
 		}
 
 	}

@@ -20,7 +20,7 @@ func (s *Service) GetConversation(
 func (s *Service) GetConversationMemeber(
 	ctx context.Context,
 	conversationID uuid.UUID,
-)([]database.User, error ) {
+) ([]database.User, error) {
 	return s.queries.GetConversationMembers(
 		ctx,
 		conversationID,
@@ -31,20 +31,20 @@ func (s *Service) IsConversationMember(
 	ctx context.Context,
 	conversationID uuid.UUID,
 	userID uuid.UUID,
-) (bool, error ) {
+) (bool, error) {
 	return s.queries.IsConversationMember(
 		ctx,
 		database.IsConversationMemberParams{
 			ConversationID: conversationID,
-			UserID: userID,
+			UserID:         userID,
 		},
 	)
 }
 
-func (s *Service) ListConversations (
+func (s *Service) ListConversations(
 	ctx context.Context,
 	userID uuid.UUID,
-)([]database.Conversation, error) {
+) ([]database.Conversation, error) {
 	return s.queries.ListConversations(
 		ctx,
 		userID,

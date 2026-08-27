@@ -48,8 +48,12 @@ func ServeWS(
 	username string,
 	onConnected func(*Client),
 ) {
-	userCount := hub.active
-	if hub != nil && userCount.Load() > 20000 {
+	if hub == nil {
+		http.Error(w, "Websocket hub is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	if hub.active.Load() > 20000 {
 		http.Error(w, "Server is busy", http.StatusServiceUnavailable)
 		return
 	}

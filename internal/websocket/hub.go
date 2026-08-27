@@ -68,11 +68,13 @@ func (h *Hub) unregisterClient(
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	delete(h.clients, client)
+	if _, ok := h.clients[client]; !ok {
+		return
+	}
 
+	delete(h.clients, client)
 	h.active.Add(-1)
 }
-
 
 // If user  have more than one websocket connection this one sends this to every last one of them
 // Absolutely unnecessary right now I am still testing this and gonna need it soon enough.

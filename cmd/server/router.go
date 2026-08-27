@@ -73,6 +73,8 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 		pr.Post("/friends/requests", deps.HandleSendFriendRequest)
 		pr.Post("/friends/requests/accept", deps.HandleAcceptFriendRequest)
 		pr.Post("/friends/requests/reject", deps.HandleRejectFriendRequest)
+		pr.Get("/chat/conversations", deps.HandleListConversations)
+		pr.Get("/chat/conversations/{conversationID}/messages", deps.HandleConversationMessages)
 
 	})
 	router.Route("/auth", func(ar chi.Router) {
