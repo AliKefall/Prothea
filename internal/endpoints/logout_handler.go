@@ -19,7 +19,7 @@ func (deps *Deps) LogoutHandler(w http.ResponseWriter, r *http.Request){
 	defer cancel()
 
 	cookie, err := r.Cookie("refresh_token")
-	clearRefreshToken(w, r)
+	clearRefreshToken(w,r)
 
 	if err != nil || cookie.Value == ""{
 		utils.RespondWithJSON(w, http.StatusOK, map[string]string{

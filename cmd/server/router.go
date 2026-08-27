@@ -2,8 +2,10 @@ package main
 
 import (
 	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/AliKefall/prothea/internal/endpoints"
 	"github.com/AliKefall/prothea/internal/ratelimiter"
@@ -35,14 +37,16 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 			return false
 		},
 		AllowedMethods:   []string{"GET", "OPTIONS", "POST", "DELETE", "PUT", "PATCH"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-Id"},
 		ExposedHeaders:   []string{"X-Request-Id"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
 
 	log.Printf("Allowed origins: %#v", config.AllowedOrigins)
-	router.Use(middleware.Logger)
+	router.Use(middleware.RequestID)
+	router.Use(requestIDResponseHeaderMiddleware)
+	router.Use(httpRequestLogMiddleware)
 	router.Use(middleware.Recoverer)
 	router.Use(securityHeaderMiddleware)
 	rateLimiter, err := ratelimiter.NewRedisTokenBucketLimiter(deps.RedisClient, 20, 10)
@@ -68,6 +72,8 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 
 	router.Group(func(pr chi.Router) {
 		pr.Use(deps.AuthMiddleware)
+
+		pr.Post("/logout", deps.LogoutHandler)
 		pr.Get("/friends", deps.HandleListFriends)
 		pr.Get("/friends/requests", deps.HandleListFriendRequests)
 		pr.Post("/friends/requests", deps.HandleSendFriendRequest)
@@ -78,11 +84,9 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 
 	})
 	router.Route("/auth", func(ar chi.Router) {
-		ar.Use(deps.AuthMiddleware)
 		ar.Post("/register", deps.RegisterHandler)
 		ar.Post("/login", deps.LoginHandler)
 		ar.Post("/refresh", deps.RefreshHandler)
-		ar.Post("/logout", deps.LogoutHandler)
 	})
 
 	return router
@@ -101,5 +105,41 @@ func securityHeaderMiddleware(next http.Handler) http.Handler {
 			headers.Set("Strict-Transport-Security", "max-age=31536000; includeSubdomains")
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// Helpers for logging
+
+func requestIDResponseHeaderMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requestID := middleware.GetReqID(r.Context()); requestID != "" {
+			w.Header().Set("X-Request-Id", requestID)
+
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func httpRequestLogMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		next.ServeHTTP(rw, r)
+
+		if r.URL.Path == "/ws" {
+			return
+		}
+
+		slog.Info(
+			"http request completed",
+			"component", "http",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", rw.Status(),
+			"bytes", rw.BytesWritten(),
+			"duration_ms", time.Since(start).Milliseconds(),
+			"request_id", middleware.GetReqID(r.Context()),
+			"remote_ip", utils.GetClientIP(r),
+		)
 	})
 }

@@ -208,7 +208,7 @@ func (deps *Deps) HandleSendFriendRequest(w http.ResponseWriter, r *http.Request
 
 	var req AddFriendRequest
 
-	utils.DecodeJSON(w, r, req)
+	utils.DecodeJSON(w, r, &req)
 
 	req.Username = strings.TrimSpace(req.Username)
 

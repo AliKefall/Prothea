@@ -121,7 +121,9 @@ func (c *Client) ReadPump() {
 
 				slog.Error(
 					"websocket read error",
+					slog.String("component", "websocket"),
 					slog.String("user", c.Username),
+					slog.String("user_id", c.UserID),
 					slog.Any("error", err),
 				)
 			}
@@ -174,7 +176,13 @@ func (c *Client) WritePump() {
 				websocket.TextMessage,
 				payload,
 			); err != nil {
-
+				slog.Error(
+					"websocket write error",
+					slog.String("component", "websocket"),
+					slog.String("user", c.Username),
+					slog.String("user_id", c.UserID),
+					slog.Any("error", err),
+				)
 				return
 			}
 
@@ -188,7 +196,13 @@ func (c *Client) WritePump() {
 				websocket.PingMessage,
 				nil,
 			); err != nil {
-
+				slog.Error(
+					"websocket ping error",
+					slog.String("component", "websocket"),
+					slog.String("user", c.Username),
+					slog.String("user_id", c.UserID),
+					slog.Any("error", err),
+				)
 				return
 			}
 		}

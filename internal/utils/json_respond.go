@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+
+	"github.com/google/uuid"
 )
 
 type ErrorResponse struct {
@@ -61,14 +63,33 @@ func RespondWithError(
 	requestID string,
 	err error,
 ) {
-	if err != nil {
-		slog.Error("request failed",
-			"status", status,
-			"code", code,
-			"error", err,
-			"request_id", requestID,
-		)
+	if requestID == "" {
+		requestID = w.Header().Get("X-Request-Id")
 	}
+	if requestID == "" {
+		requestID = w.Header().Get("X-Request-ID")
+	}
+	if requestID == "" {
+		requestID = "req_" + uuid.NewString()
+	}
+	w.Header().Set("X-Request-Id", requestID)
+
+	attrs := []any{
+		"component", "http",
+		"status", status,
+		"code", code,
+		"message", message,
+		"request_id", requestID,
+	}
+
+	if err != nil {
+		attrs = append(attrs, "error", err)
+	} else {
+		attrs = append(attrs, "error", "")
+	}
+
+	slog.Error("request failed", attrs...)
+
 	resp := ErrorResponse{
 		Error: ErrorBody{
 			Code:      code,

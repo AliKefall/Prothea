@@ -245,7 +245,6 @@ func (deps *Deps) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-
 	ttl := time.Until(newExpires)
 
 	if err := deps.RedisClient.Set(
@@ -310,7 +309,7 @@ func clearRefreshToken(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   utils.ShouldUseSecureCookie(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 

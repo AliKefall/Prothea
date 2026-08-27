@@ -24,7 +24,7 @@ const (
 
 func (deps *Deps) AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token, err := auth.GetBearer(r)
+		token, err := auth.GetBearer(r.Header)
 		if err != nil {
 			// Fallback for websocket clients
 			token = r.URL.Query().Get("token")

@@ -6,22 +6,22 @@ import (
 	"strings"
 )
 
-func GetBearer(r *http.Request) (string, error){
-	header:= r.Header.Get("Authorization")
-	if header  == "" {
+
+func GetBearer(header http.Header) (string, error){
+	authHeader := strings.TrimSpace(header.Get("Authorization"))
+	if authHeader == ""{
 		return "", errors.New("Authorization header not found")
 	}
 
-	parts := strings.SplitN(header, " ", 2)
+	parts := strings.SplitN(authHeader, " ", 2)
 	if len(parts) != 2 {
 		return "", errors.New("Invalid authorization header")
 	}
-
-	if strings.TrimSpace(strings.ToLower(parts[0])) != "bearer "{
+	if strings.ToLower(parts[0]) != "bearer"{
 		return "", errors.New("Invalid authorization scheme")
 	}
 	token := strings.TrimSpace(parts[1])
-	if token == "" {
+	if token == ""{
 		return "", errors.New("bearer token not found")
 	}
 

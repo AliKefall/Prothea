@@ -194,7 +194,7 @@ func (deps *Deps) LoginHandler(w http.ResponseWriter, r *http.Request) {
 			Name:     "refresh_token",
 			Value:    refreshToken,
 			HttpOnly: true,
-			Secure:   false,
+			Secure:   utils.ShouldUseSecureCookie(r),
 			SameSite: http.SameSiteLaxMode, // NOTE: Don't forget to change this in prod
 			Path:     "/",
 			Expires:  refreshExpires,

@@ -1,7 +1,7 @@
 package websocket
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -49,18 +49,36 @@ func ServeWS(
 	onConnected func(*Client),
 ) {
 	if hub == nil {
+		slog.Error(
+			"websocket hub unavailable",
+			slog.String("component", "websocket"),
+			slog.String("remote_ip", utils.GetClientIP(r)),
+		)
 		http.Error(w, "Websocket hub is unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
 	if hub.active.Load() > 20000 {
+		slog.Warn(
+			"websocket server busy",
+			slog.String("component", "websocket"),
+			slog.Any("active connections", hub.active.Load()),
+			slog.String("remote_ip", utils.GetClientIP(r)),
+		)
 		http.Error(w, "Server is busy", http.StatusServiceUnavailable)
 		return
 	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("ws upgrade failed for user=%s remote=%s err=%v", username, utils.GetClientIP(r), err)
+		slog.Error(
+			"websocket upgrade fail",
+			slog.String("component", "websocket"),
+			slog.String("user", username),
+			slog.String("user_id", userID),
+			slog.String("remote_ip", utils.GetClientIP(r)),
+			slog.Any("error", err),
+		)
 		return
 	}
 
@@ -69,13 +87,21 @@ func ServeWS(
 	select {
 	case hub.register <- client:
 	case <-time.After(3 * time.Second):
-		log.Printf("ws register timeout user=%s", username)
-		conn.Close()
+		slog.Info("websocket request canceled before register", "component", "websocket", "user", username, "user_id", userID, "error", r.Context().Err())
+		_ = conn.Close()
 		return
 	case <-r.Context().Done():
 		conn.Close()
 		return
 	}
+
+	slog.Info(
+		"websocket connected",
+		slog.String("component", "websocket"),
+		slog.String("user", username),
+		slog.String("user_id", userID),
+		slog.String("remote_ip", utils.GetClientIP(r)),
+	)
 
 	if onConnected != nil {
 		onConnected(client)
@@ -84,7 +110,13 @@ func ServeWS(
 	go func() {
 		defer func() {
 			if rec := recover(); rec != nil {
-				log.Printf("panic in WritePump user=%s err=%v", username, rec)
+				slog.Error(
+					"panic in websocket write pump",
+					slog.String("component", "websocket"),
+					slog.String("user", username),
+					slog.String("user_id", userID),
+					slog.Any("error", rec),
+				)
 			}
 		}()
 		client.WritePump()
@@ -93,7 +125,13 @@ func ServeWS(
 	go func() {
 		defer func() {
 			if rec := recover(); rec != nil {
-				log.Printf("panic in ReadPump user=%s err=%v", username, rec)
+				slog.Error(
+					"panic in websocket write pump",
+					slog.String("component", "websocket"),
+					slog.String("user", username),
+					slog.String("user_id", userID),
+					slog.Any("error", rec),
+				)
 			}
 		}()
 		client.ReadPump()
