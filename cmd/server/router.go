@@ -78,6 +78,7 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 
 	})
 	router.Route("/auth", func(ar chi.Router) {
+		ar.Use(deps.AuthMiddleware)
 		ar.Post("/register", deps.RegisterHandler)
 		ar.Post("/login", deps.LoginHandler)
 		ar.Post("/refresh", deps.RefreshHandler)
