@@ -2,77 +2,97 @@ package chat
 
 import (
 	"context"
-	"encoding/json"
+	"database/sql"
 	"errors"
-	"strings"
 
-	"github.com/AliKefall/prothea/internal/websocket"
+	"github.com/AliKefall/prothea/internal/database"
 	"github.com/google/uuid"
 )
 
-var (
-	ErrInvalidRecipientID = errors.New("invalid recipient id")
-	ErrEmptyMessage = errors.New("message can not be empty")
-)
-
 type Service struct{
-	hub *websocket.Hub
+	db *sql.DB
+	queries *database.Queries
 }
 
-func NewService(hub *websocket.Hub) *Service{
+func NewService(
+	db *sql.DB,
+	queries *database.Queries,
+) *Service {
 	return &Service{
-		hub: hub,
+		db: db,
+		queries: queries,
 	}
 }
 
-func (s *Service) HandleSendMessage(
+func (s *Service) getOrCreateDirectConversation(
 	ctx context.Context,
-	client *websocket.Client,
-	event websocket.Event,
-)error{
-	var input SendMessageInput
+	userA uuid.UUID,
+	userB uuid.UUID,
+) (database.Conversation, error) {
+	if userA == userB {
+		return database.Conversation{}, errors.New("can not create conversation with yourself")
 
-	if err := json.Unmarshal(event.Payload, &input); err != nil {
-		return err
 	}
 
-	input.RecipientID = strings.TrimSpace(input.RecipientID)
-	input.Content = strings.TrimSpace(input.Content)
+	conversation, err := s.queries.FindDirectConversation(ctx, database.FindDirectConversationParams{
+		UserID: userA,
+		UserID_2: userB,
+	})
 
-	if input.RecipientID == ""{
-		return ErrInvalidRecipientID
+	if err == nil {
+		return conversation, nil
 	}
 
-	if input.Content == "" {
-		return ErrEmptyMessage
+	if !errors.Is(err, sql.ErrNoRows) {
+		return database.Conversation{}, err
 	}
 
-	if _, err := uuid.Parse(input.RecipientID); err != nil {
-		return ErrInvalidRecipientID
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return database.Conversation{}, err
 	}
 
-	messageID := uuid.NewString()
+	defer func(){
+		_ = tx.Rollback()
+	}()
 
-	payload := MessagePayload{
-		MessageID: messageID,
-		SenderID: client.UserID,
-		SenderUsername: client.Username,
-		RecipientID: input.RecipientID,
-		Content: input.Content,
-	}
+	qtx := s.queries.WithTx(tx)
 
-	message, err := websocket.NewEvent(
-		websocket.EventChatMessage,
-		payload,
-	)
+	conversationID := uuid.New()
+
+	conversation, err = qtx.CreateConversation(ctx, database.CreateConversationParams{
+		ID: conversationID,
+		Type: "direct",
+	})
 
 	if err != nil {
-		return err
+		return database.Conversation{}, err
 	}
 
-	return s.hub.SendToUser(
-		input.RecipientID,
-		message,
-	)
+	if _, err := qtx.AddConversationMember(ctx, database.AddConversationMemberParams{
+		ConversationID: conversationID,
+		UserID: userA,
+	}); err != nil {
+		return database.Conversation{}, err
+	}
 
+	if _, err := qtx.AddConversationMember(ctx, database.AddConversationMemberParams{
+		ConversationID: conversationID,
+		UserID: userA,
+	}); err != nil {
+		return database.Conversation{}, err
+	}
+
+	if _, err := qtx.AddConversationMember(ctx, database.AddConversationMemberParams{
+		ConversationID: conversationID,
+		UserID: userB,
+	}); err != nil {
+		return database.Conversation{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return database.Conversation{}, err
+	}
+
+	return conversation, nil
 }

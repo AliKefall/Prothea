@@ -31,7 +31,7 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 
 	hub := websocket.NewHub()
 
-	chatService := chat.NewService(hub)
+	chatService := chat.NewService(conn, queries)
 	hub.Register(websocket.EventChatSend, chatService.HandleSendMessage)
 
 	deps := &endpoints.Deps{

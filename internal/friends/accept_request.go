@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/AliKefall/prothea/internal/database"
-	"github.com/AliKefall/prothea/internal/websocket"
 	"github.com/google/uuid"
 )
 
