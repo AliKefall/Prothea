@@ -26,6 +26,11 @@ type ConversationResponse struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type ConversationMemberResponse struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+}
+
 func toChatMessageReponse(m database.Message) ChatMessageResponse {
 	response := ChatMessageResponse{
 		ID:             m.ID.String(),
@@ -161,6 +166,110 @@ func (deps *Deps) HandleConversationMessages(w http.ResponseWriter, r *http.Requ
 	}
 
 	utils.RespondWithJSON(w, http.StatusOK, response)
+}
+
+func (deps *Deps) HandleConversationMembers(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	userID, ok := r.Context().Value(UserIDKey).(uuid.UUID)
+
+	if !ok || userID == uuid.Nil {
+		utils.RespondWithError(
+			w,
+			http.StatusUnauthorized,
+			"unauthorized",
+			"invalid user context",
+			"",
+			nil,
+		)
+		return
+	}
+
+	conversationID, err := uuid.Parse(
+		chi.URLParam(r, "conversationID"),
+	)
+
+	if err != nil {
+		utils.RespondWithError(
+			w,
+			http.StatusBadRequest,
+			"chat_error",
+			"conversation id is invalid",
+			"",
+			err,
+		)
+		return
+	}
+
+	isMember, err := deps.Chat.IsConversationMember(
+		r.Context(),
+		conversationID,
+		userID,
+	)
+
+	if err != nil {
+		utils.RespondWithError(
+			w,
+			http.StatusInternalServerError,
+			"database_error",
+			"could not verify conversation",
+			"",
+			err,
+		)
+		return
+	}
+
+	if !isMember {
+		utils.RespondWithError(
+			w,
+			http.StatusForbidden,
+			"forbidden",
+			"You are not a member of this conversation",
+			"",
+			nil,
+		)
+		return
+	}
+
+	members, err := deps.Chat.GetConversationMember(
+		r.Context(),
+		conversationID,
+	)
+
+	if err != nil {
+		utils.RespondWithError(
+			w,
+			http.StatusInternalServerError,
+			"database_error",
+			"could not load conversation members",
+			"",
+			err,
+		)
+		return
+	}
+
+	response := make(
+		[]ConversationMemberResponse,
+		0,
+		len(members),
+	)
+
+	for _, member := range members {
+		response = append(
+			response,
+			ConversationMemberResponse{
+				ID:       member.ID.String(),
+				Username: member.Username,
+			},
+		)
+	}
+
+	utils.RespondWithJSON(
+		w,
+		http.StatusOK,
+		response,
+	)
 }
 
 func parsePagination(r *http.Request, defaultLimit int32, maxLimit int32) (int32, int32) {

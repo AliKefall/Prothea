@@ -72,16 +72,27 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 
 	router.Group(func(pr chi.Router) {
 		pr.Use(deps.AuthMiddleware)
-
 		pr.Post("/logout", deps.LogoutHandler)
 		pr.Get("/friends", deps.HandleListFriends)
 		pr.Get("/friends/requests", deps.HandleListFriendRequests)
 		pr.Post("/friends/requests", deps.HandleSendFriendRequest)
 		pr.Post("/friends/requests/accept", deps.HandleAcceptFriendRequest)
 		pr.Post("/friends/requests/reject", deps.HandleRejectFriendRequest)
-		pr.Get("/chat/conversations", deps.HandleListConversations)
-		pr.Get("/chat/conversations/{conversationID}/messages", deps.HandleConversationMessages)
 
+		pr.Get(
+			"/chat/conversations",
+			deps.HandleListConversations,
+		)
+
+		pr.Get(
+			"/chat/conversations/{conversationID}/members",
+			deps.HandleConversationMembers,
+		)
+
+		pr.Get(
+			"/chat/conversations/{conversationID}/messages",
+			deps.HandleConversationMessages,
+		)
 	})
 	router.Route("/auth", func(ar chi.Router) {
 		ar.Post("/register", deps.RegisterHandler)

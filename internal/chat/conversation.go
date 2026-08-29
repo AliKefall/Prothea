@@ -17,7 +17,7 @@ func (s *Service) GetConversation(
 	)
 }
 
-func (s *Service) GetConversationMemeber(
+func (s *Service) GetConversationMember(
 	ctx context.Context,
 	conversationID uuid.UUID,
 ) ([]database.User, error) {
