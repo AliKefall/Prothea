@@ -10,6 +10,12 @@ import { FriendRequests } from "./friend-requests";
 import { AddFriendDialog } from "./add-friend-dialog";
 
 import { useFriendsPanelStore } from "../store/panel-store";
+import { useFriends } from "../hooks/use-friends";
+import { useFriendsWebSocket } from "../hooks/use-friends-websocket";
+
+import {
+  openDirectConversation,
+} from "@/features/chat/store/actions";
 
 import {
   useFriendsList,
@@ -22,11 +28,18 @@ export function FriendsPanel() {
   const isOpen = useFriendsPanelStore((state) => state.isOpen);
   const close = useFriendsPanelStore((state) => state.close);
 
+  useFriends();
+  useFriendsWebSocket();
+
   const friends = useFriendsList();
   const requests = useIncomingRequests();
 
   const onlineFriends = useOnlineFriends();
   const offlineFriends = useOfflineFriends();
+
+  function handleFriendClick(friendID: string) {
+  void openDirectConversation(friendID);
+}
 
   return (
     <>
@@ -71,24 +84,17 @@ export function FriendsPanel() {
           transition-transform
           duration-300
           ease-in-out
-          ${
-            isOpen
-              ? "translate-x-0"
-              : "translate-x-full"
-          }
+          ${isOpen ? "translate-x-0" : "translate-x-full"}
         `}
       >
         {/* Header */}
         <header className="shrink-0 border-b border-zinc-800 px-5 py-5">
           <div className="flex items-start justify-between">
             <div className="min-w-0">
-              <h2 className="text-xl font-semibold text-zinc-100">
-                Friends
-              </h2>
+              <h2 className="text-xl font-semibold text-zinc-100">Friends</h2>
 
               <p className="mt-1 text-sm text-zinc-500">
-                {friends.length}{" "}
-                {friends.length === 1 ? "friend" : "friends"}
+                {friends.length} {friends.length === 1 ? "friend" : "friends"}
               </p>
             </div>
 
@@ -121,9 +127,7 @@ export function FriendsPanel() {
             {/* Friend requests */}
             <FriendRequests />
 
-            {requests.length > 0 && (
-              <Separator className="bg-zinc-800" />
-            )}
+            {requests.length > 0 && <Separator className="bg-zinc-800" />}
 
             {/* No friends */}
             {friends.length === 0 ? (
@@ -158,6 +162,7 @@ export function FriendsPanel() {
                         <FriendCard
                           key={friend.id}
                           friend={friend}
+                          onClick={() => handleFriendClick(friend.id)}
                         />
                       ))}
                     </div>
@@ -182,6 +187,7 @@ export function FriendsPanel() {
                         <FriendCard
                           key={friend.id}
                           friend={friend}
+                          onClick={() => handleFriendClick(friend.id)}
                         />
                       ))}
                     </div>

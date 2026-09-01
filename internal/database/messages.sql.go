@@ -7,6 +7,7 @@ package database
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -345,24 +346,42 @@ func (q *Queries) ListConversationMember(ctx context.Context, conversationID uui
 }
 
 const listConversations = `-- name: ListConversations :many
-SELECT c.id, c.type, c.created_at
+SELECT
+    c.id, c.type, c.created_at,
+    cm_other.user_id AS recipient_id
 FROM conversations c
 JOIN conversation_members cm
-ON cm.conversation_id = c.id
+    ON cm.conversation_id = c.id
+JOIN conversation_members cm_other
+    ON cm_other.conversation_id = c.id
+    AND cm_other.user_id != cm.user_id
 WHERE cm.user_id = $1
+  AND c.type = 'direct'
 ORDER BY c.created_at DESC
 `
 
-func (q *Queries) ListConversations(ctx context.Context, userID uuid.UUID) ([]Conversation, error) {
+type ListConversationsRow struct {
+	ID          uuid.UUID
+	Type        ConversationType
+	CreatedAt   time.Time
+	RecipientID uuid.UUID
+}
+
+func (q *Queries) ListConversations(ctx context.Context, userID uuid.UUID) ([]ListConversationsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listConversations, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Conversation
+	var items []ListConversationsRow
 	for rows.Next() {
-		var i Conversation
-		if err := rows.Scan(&i.ID, &i.Type, &i.CreatedAt); err != nil {
+		var i ListConversationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Type,
+			&i.CreatedAt,
+			&i.RecipientID,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

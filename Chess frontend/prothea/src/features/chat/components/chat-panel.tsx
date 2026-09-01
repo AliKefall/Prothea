@@ -1,22 +1,13 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { SyntheticEvent, useEffect, useState } from "react";
+import { ChevronDownIcon, ChevronUpIcon } from "@heroicons/react/24/outline";
 
 import { useAuthStore } from "@/features/auth/auth-store";
 
-import {
-  loadConversations,
-  selectConversation,
-  sendMessage,
-} from "../store/actions";
+import { loadConversations, sendMessage } from "../store/actions";
 
-import {
-  useChatError,
-  useConversations,
-  useConversationsLoading,
-  useMessages,
-  useSelectedConversation,
-} from "../store/selectors";
+import { useChatError, useSelectedConversation } from "../store/selectors";
 
 import { useConversationMessages } from "../hooks/use-messages";
 import { useChatWebSocket } from "../store/use-chat-websocket";
@@ -26,19 +17,14 @@ import { MessageBubble } from "./message-bubble";
 export function ChatPanel() {
   const user = useAuthStore((state) => state.user);
 
-  const conversations = useConversations();
-  const conversationsLoading = useConversationsLoading();
   const selectedConversation = useSelectedConversation();
   const error = useChatError();
 
-  const {
-    conversationID,
-    messages,
-    loading: messagesLoading,
-  } = useConversationMessages();
+  const { messages, loading: messagesLoading } = useConversationMessages();
 
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
+  const [minimized, setMinimized] = useState(false);
 
   useChatWebSocket();
 
@@ -46,14 +32,18 @@ export function ChatPanel() {
     void loadConversations();
   }, []);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  function handleSubmit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!conversationID) {
+    if (!selectedConversation) {
       return;
     }
 
-    if (!user?.id) {
+    if (selectedConversation.type !== "direct") {
+      return;
+    }
+
+    if (!selectedConversation.recipient_id) {
       return;
     }
 
@@ -66,7 +56,7 @@ export function ChatPanel() {
     try {
       setSending(true);
 
-      await sendMessage(conversationID, user.id, trimmedContent);
+      sendMessage(selectedConversation.recipient_id, trimmedContent);
 
       setContent("");
     } catch (error) {
@@ -76,132 +66,97 @@ export function ChatPanel() {
     }
   }
 
+  if (!selectedConversation) {
+    return null;
+  }
+
   return (
-    <div className="flex h-full min-h-0 w-full overflow-hidden rounded-lg border bg-background">
-      {/* Conversations */}
-      <aside className="flex w-80 shrink-0 flex-col border-r">
-        <div className="border-b px-4 py-3">
-          <h2 className="font-semibold">Conversations</h2>
+    <div
+      className={[
+        "fixed bottom-0 left-15 z-50 flex w-80 flex-col",
+        "overflow-hidden rounded-t-xl border bg-background shadow-2xl",
+      ].join(" ")}
+    >
+      {/* Header */}
+      <header className="flex h-12 shrink-0 items-center justify-between border-b px-4">
+        <div className="min-w-0">
+          <h2 className="truncate text-sm font-semibold"></h2>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-          {conversationsLoading ? (
-            <div className="p-4 text-sm text-muted-foreground">
-              Loading conversations...
-            </div>
-          ) : conversations.length === 0 ? (
-            <div className="p-4 text-sm text-muted-foreground">
-              No conversations yet.
-            </div>
-          ) : (
-            conversations.map((conversation) => {
-              const isSelected = conversation.id === conversationID;
+        <div className="flex items-center gap-2">
+          <div className="h-2 w-2 rounded-full bg-green-500" />
 
-              return (
-                <button
-                  key={conversation.id}
-                  type="button"
-                  onClick={() => selectConversation(conversation.id)}
-                  className={[
-                    "flex w-full items-center px-4 py-3 text-left",
-                    "transition-colors hover:bg-muted",
-                    isSelected ? "bg-muted" : "",
-                  ].join(" ")}
-                >
-                  <div>
-                    <div className="font-medium">
-                      {conversation.type === "direct"
-                        ? "Direct message"
-                        : "Group"}
-                    </div>
-
-                    <div className="text-xs text-muted-foreground">
-                      {conversation.id}
-                    </div>
-                  </div>
-                </button>
-              );
-            })
-          )}
-        </div>
-      </aside>
-
-      {/* Chat */}
-      <section className="flex min-w-0 flex-1 flex-col">
-        {!selectedConversation ? (
-          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            Select a conversation
-          </div>
-        ) : (
-          <>
-            {/* Header */}
-            <header className="shrink-0 border-b px-4 py-3">
-              <h2 className="font-semibold">
-                {selectedConversation.type === "direct"
-                  ? "Direct message"
-                  : "Group"}
-              </h2>
-
-              <p className="text-xs text-muted-foreground">
-                {selectedConversation.id}
-              </p>
-            </header>
-
-            {/* Error */}
-            {error && (
-              <div className="border-b px-4 py-2 text-sm text-destructive">
-                {error.message}
-              </div>
+          <button
+            type="button"
+            onClick={() => setMinimized((value) => !value)}
+            aria-label={minimized ? "Expand chat" : "Minimize chat"}
+            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            {minimized ? (
+              <ChevronUpIcon className="h-4 w-4" />
+            ) : (
+              <ChevronDownIcon className="h-4 w-4" />
             )}
+          </button>
+        </div>
+      </header>
 
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4">
-              {messagesLoading ? (
-                <div className="text-sm text-muted-foreground">
-                  Loading messages...
-                </div>
-              ) : messages.length === 0 ? (
-                <div className="text-sm text-muted-foreground">
-                  No messages yet.
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {messages.map((message) => (
-                    <MessageBubble
-                      key={message.id}
-                      message={message}
-                      isOwnMessage={message.sender_id === user?.user_id}
-                    />
-                  ))}
-                </div>
-              )}
+      {!minimized && (
+        <>
+          {/* Error */}
+          {error && (
+            <div className="border-b px-3 py-2 text-xs text-destructive">
+              {error.message}
             </div>
+          )}
 
-            {/* Input */}
-            <form
-              onSubmit={handleSubmit}
-              className="flex shrink-0 gap-2 border-t p-3"
+          {/* Messages */}
+          <div className="flex h-80 flex-col gap-2 overflow-y-auto p-3">
+            {messagesLoading ? (
+              <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
+                Loading...
+              </div>
+            ) : messages.length === 0 ? (
+              <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
+                No messages yet.
+              </div>
+            ) : (
+              messages.map((message) => (
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  isOwnMessage={message.sender_id === user?.user_id}
+                />
+              ))
+            )}
+          </div>
+
+          {/* Input */}
+          <form
+            onSubmit={handleSubmit}
+            className="flex shrink-0 gap-2 border-t p-2"
+          >
+            <input
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+              placeholder="Write a message..."
+              maxLength={500}
+              disabled={sending}
+              className="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-xs outline-none focus:ring-2"
+            />
+
+            <button
+              type="submit"
+              disabled={
+                sending || !content.trim() || !selectedConversation.recipient_id
+              }
+              className="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:pointer-events-none disabled:opacity-50"
             >
-              <input
-                value={content}
-                onChange={(event) => setContent(event.target.value)}
-                placeholder="Write a message..."
-                maxLength={500}
-                disabled={sending}
-                className="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2"
-              />
-
-              <button
-                type="submit"
-                disabled={sending || !content.trim() || !conversationID}
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:pointer-events-none disabled:opacity-50"
-              >
-                {sending ? "Sending..." : "Send"}
-              </button>
-            </form>
-          </>
-        )}
-      </section>
+              Send
+            </button>
+          </form>
+        </>
+      )}
     </div>
   );
 }

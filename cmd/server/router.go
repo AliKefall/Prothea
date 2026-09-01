@@ -78,7 +78,6 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 		pr.Post("/friends/requests", deps.HandleSendFriendRequest)
 		pr.Post("/friends/requests/accept", deps.HandleAcceptFriendRequest)
 		pr.Post("/friends/requests/reject", deps.HandleRejectFriendRequest)
-
 		pr.Get(
 			"/chat/conversations",
 			deps.HandleListConversations,
@@ -93,6 +92,12 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 			"/chat/conversations/{conversationID}/messages",
 			deps.HandleConversationMessages,
 		)
+		pr.Post(
+			"/chat/conversations/direct",
+			deps.HandleCreateDirectConversation,
+		)
+		pr.Post("/matchmaking/enqueue", deps.EnqueueHandler)
+		pr.Post("/matchmaking/dequeue", deps.DequeueHandler)
 	})
 	router.Route("/auth", func(ar chi.Router) {
 		ar.Post("/register", deps.RegisterHandler)

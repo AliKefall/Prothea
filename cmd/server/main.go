@@ -9,19 +9,39 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/AliKefall/prothea/internal/matchmaking"
 	"github.com/joho/godotenv"
 )
 
+// NOTE: Write a decent bootstrap for services.
+// Also write more readeble code for the f sake
 func main() {
 	godotenv.Load()
+
 	config := NewServer()
+
 	conn, deps := bootstrapServer(config)
 	defer conn.Close()
 	defer deps.redis.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// WebSocket hub
 	go deps.hub.Run(ctx)
+
+	// Matchmaking worker
+	matchmakingWorker := &matchmaking.Worker{
+		Hub:          deps.hub,
+		TimeControls: matchmaking.SupportedTimeControls,
+		PollInterval: matchmaking.DefaultPollInterval,
+		BatchSize:    matchmaking.DefaultMatchBatchSize,
+	}
+
+	go matchmakingWorker.Run(
+		ctx,
+		deps.deps.Matchmaking,
+	)
 
 	server := &http.Server{
 		Addr:              ":" + config.Port,
@@ -34,16 +54,17 @@ func main() {
 
 	go func() {
 		log.Printf("server listening on %s", server.Addr)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+
+		if err := server.ListenAndServe(); err != nil &&
+			err != http.ErrServerClosed {
 			log.Fatalf("server failed: %v", err)
 		}
 	}()
 
 	serverShutdown(server)
+
 	cancel()
-
 }
-
 func serverShutdown(srv *http.Server) {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)

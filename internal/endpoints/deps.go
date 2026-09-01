@@ -22,7 +22,7 @@ type Deps struct {
 	Friends     *friends.Service
 	Matchmaking *matchmaking.Service
 	Hub         *websocket.Hub
-	Chat *chat.Service
+	Chat        *chat.Service
 }
 
 func (deps *Deps) MustUserIDString(r *http.Request) (string, error) {

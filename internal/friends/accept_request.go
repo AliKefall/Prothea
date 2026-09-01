@@ -2,8 +2,10 @@ package friends
 
 import (
 	"context"
+	"time"
 
 	"github.com/AliKefall/prothea/internal/database"
+	"github.com/AliKefall/prothea/internal/websocket"
 	"github.com/google/uuid"
 )
 
@@ -44,8 +46,9 @@ func (s *Service) AcceptFriendRequest(
 	rows, err := qtx.CreateFriendship(
 		ctx,
 		database.CreateFriendshipParams{
-			UserID:   a,
-			FriendID: b,
+			UserID:    a,
+			FriendID:  b,
+			CreatedAt: time.Now().UTC(),
 		},
 	)
 
@@ -60,6 +63,29 @@ func (s *Service) AcceptFriendRequest(
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+
+	accepter, err := s.queries.GetUserByID(ctx, accepterID)
+	if err != nil {
+		return err
+	}
+
+	requester, err := s.queries.GetUserByID(ctx, requesterID)
+	if err != nil {
+		return err
+	}
+
+	// Backend reference: POST /friends/requests/accept removes the request, creates the friendship,
+	// then emits websocket.EventAcceptFriendshipRequest to both users so both friend lists update.
+	s.notifyUser(accepterID, websocket.EventAcceptFriendshipRequest, FriendEventPayload{
+		ID:       requester.ID.String(),
+		Username: requester.Username,
+		Online:   true,
+	})
+	s.notifyUser(requesterID, websocket.EventAcceptFriendshipRequest, FriendEventPayload{
+		ID:       accepter.ID.String(),
+		Username: accepter.Username,
+		Online:   true,
+	})
 
 	return nil
 }

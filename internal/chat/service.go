@@ -28,7 +28,7 @@ func NewService(
 	}
 }
 
-func (s *Service) getOrCreateDirectConversation(
+func (s *Service) GetOrCreateDirectConversation(
 	ctx context.Context,
 	userA uuid.UUID,
 	userB uuid.UUID,

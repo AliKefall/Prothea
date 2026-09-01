@@ -133,9 +133,15 @@ SELECT EXISTS(
 );
 
 -- name: ListConversations :many
-SELECT c.*
+SELECT
+    c.*,
+    cm_other.user_id AS recipient_id
 FROM conversations c
 JOIN conversation_members cm
-ON cm.conversation_id = c.id
+    ON cm.conversation_id = c.id
+JOIN conversation_members cm_other
+    ON cm_other.conversation_id = c.id
+    AND cm_other.user_id != cm.user_id
 WHERE cm.user_id = $1
+  AND c.type = 'direct'
 ORDER BY c.created_at DESC;

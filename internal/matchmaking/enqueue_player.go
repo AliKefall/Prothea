@@ -31,10 +31,25 @@ func (s *Service) EnqueuePlayer(ctx context.Context, entry QueueEntry) error {
 		return err
 	}
 
-	result, err := s.Redis.Eval(ctx, string(script), []string{
-		"matchmaking:queue:" + entry.TimeControl,
-		"matchmaking:user:" + entry.UserID.String(),
-	}, entry.UserID.String(), entry.Username, entry.Rating, entry.JoinedAt, entry.TimeControl, int(s.QueueTTL.Seconds())).Result()
+	// We are sending a time object into the script
+	// but script only takes int or string as an argument so this time conversion
+	// is necessery for this.
+	joinedAt := entry.JoinedAt.UTC().Unix()
+
+	result, err := s.Redis.Eval(
+		ctx,
+		string(script),
+		[]string{
+			"matchmaking:queue:" + entry.TimeControl,
+			"matchmaking:user:" + entry.UserID.String(),
+		},
+		entry.UserID.String(),
+		entry.Username,
+		entry.Rating,
+		joinedAt,
+		entry.TimeControl,
+		int(s.QueueTTL.Seconds()),
+	).Result()
 
 	if err != nil {
 		if err.Error() == "already_queued" || err.Error() == "ERR already_queued" {

@@ -1,6 +1,7 @@
 package endpoints
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
@@ -21,14 +22,19 @@ type ChatMessageResponse struct {
 }
 
 type ConversationResponse struct {
-	ID        string    `json:"id"`
-	Type      string    `json:"type"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          string    `json:"id"`
+	Type        string    `json:"type"`
+	RecipientID string    `json:"recipient_id,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type ConversationMemberResponse struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
+}
+
+type CreateDirectConversationRequest struct {
+	RecipientID string `json:"recipient_id"`
 }
 
 func toChatMessageReponse(m database.Message) ChatMessageResponse {
@@ -39,18 +45,99 @@ func toChatMessageReponse(m database.Message) ChatMessageResponse {
 		Content:        m.Content,
 		CreatedAt:      m.CreatedAt,
 	}
+
 	if m.EditedAt.Valid {
 		response.EditedAt = &m.EditedAt.Time
 	}
+
 	return response
 }
 
-func toConversationResponse(c database.Conversation) ConversationResponse {
+func toConversationResponse(
+	c database.ListConversationsRow,
+) ConversationResponse {
 	return ConversationResponse{
-		ID:        c.ID.String(),
-		Type:      string(c.Type),
-		CreatedAt: c.CreatedAt,
+		ID:          c.ID.String(),
+		Type:        string(c.Type),
+		RecipientID: c.RecipientID.String(),
+		CreatedAt:   c.CreatedAt,
 	}
+}
+
+func (deps *Deps) HandleCreateDirectConversation(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	userID, ok := r.Context().Value(UserIDKey).(uuid.UUID)
+
+	if !ok || userID == uuid.Nil {
+		utils.RespondWithError(
+			w,
+			http.StatusUnauthorized,
+			"unauthorized",
+			"invalid user context",
+			"",
+			nil,
+		)
+		return
+	}
+
+	var req CreateDirectConversationRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.RespondWithError(
+			w,
+			http.StatusBadRequest,
+			"chat_error",
+			"invalid request body",
+			"",
+			err,
+		)
+		return
+	}
+
+	recipientID, err := uuid.Parse(req.RecipientID)
+
+	if err != nil || recipientID == uuid.Nil {
+		utils.RespondWithError(
+			w,
+			http.StatusBadRequest,
+			"chat_error",
+			"recipient_id is invalid",
+			"",
+			err,
+		)
+		return
+	}
+
+	conversation, err := deps.Chat.GetOrCreateDirectConversation(
+		r.Context(),
+		userID,
+		recipientID,
+	)
+
+	if err != nil {
+		utils.RespondWithError(
+			w,
+			http.StatusInternalServerError,
+			"chat_error",
+			"could not create conversation",
+			"",
+			err,
+		)
+		return
+	}
+
+	utils.RespondWithJSON(
+		w,
+		http.StatusOK,
+		ConversationResponse{
+			ID:          conversation.ID.String(),
+			Type:        string(conversation.Type),
+			RecipientID: recipientID.String(),
+			CreatedAt:   conversation.CreatedAt,
+		},
+	)
 }
 
 func (deps *Deps) HandleListConversations(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +167,6 @@ func (deps *Deps) HandleListConversations(w http.ResponseWriter, r *http.Request
 	}
 
 	utils.RespondWithJSON(w, http.StatusOK, response)
-
 }
 
 func (deps *Deps) HandleConversationMessages(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +198,11 @@ func (deps *Deps) HandleConversationMessages(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	isMember, err := deps.Chat.IsConversationMember(r.Context(), conversationID, userID)
+	isMember, err := deps.Chat.IsConversationMember(
+		r.Context(),
+		conversationID,
+		userID,
+	)
 
 	if err != nil {
 		utils.RespondWithError(
@@ -272,18 +362,25 @@ func (deps *Deps) HandleConversationMembers(
 	)
 }
 
-func parsePagination(r *http.Request, defaultLimit int32, maxLimit int32) (int32, int32) {
+func parsePagination(
+	r *http.Request,
+	defaultLimit int32,
+	maxLimit int32,
+) (int32, int32) {
 	limit := defaultLimit
+
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		if parsed, err := strconv.ParseInt(raw, 10, 32); err == nil && parsed > 0 {
 			limit = int32(parsed)
 		}
 	}
+
 	if limit > maxLimit {
 		limit = maxLimit
 	}
 
 	var offset int32
+
 	if raw := r.URL.Query().Get("offset"); raw != "" {
 		if parsed, err := strconv.ParseInt(raw, 10, 32); err == nil && parsed > 0 {
 			offset = int32(parsed)

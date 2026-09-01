@@ -34,6 +34,8 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 	chatService := chat.NewService(conn, queries, hub)
 	hub.Register(websocket.EventChatSend, chatService.HandleSendMessage)
 
+	matchmakingService := matchmaking.NewMatchmakingService(redisClient)
+
 	deps := &endpoints.Deps{
 		DB:          conn,
 		Queries:     queries,
@@ -41,9 +43,9 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 		Hasher:      auth.NewPasswordHasher(),
 		JWT:         auth.NewJWTManager(config.JWTSecret, 15*time.Minute),
 		Friends:     friends.NewService(conn, queries, hub),
-		Matchmaking: matchmaking.NewMatchmakingService(redisClient),
+		Matchmaking: matchmakingService,
 		Hub:         hub,
-		Chat: chatService,
+		Chat:        chatService,
 	}
 
 	return conn, serverDependencies{

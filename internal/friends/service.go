@@ -7,20 +7,20 @@ import (
 	"github.com/AliKefall/prothea/internal/websocket"
 )
 
-type Service struct{
-	db *sql.DB
+type Service struct {
+	db      *sql.DB
 	queries *database.Queries
-	hub *websocket.Hub
+	hub     *websocket.Hub
 }
 
 func NewService(
 	db *sql.DB,
 	queries *database.Queries,
 	hub *websocket.Hub,
-) *Service{
+) *Service {
 	return &Service{
-		db: db,
+		db:      db,
 		queries: queries,
-		hub: hub,
+		hub:     hub,
 	}
 }

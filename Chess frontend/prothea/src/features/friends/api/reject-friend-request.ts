@@ -12,7 +12,7 @@ export async function rejectFriendRequest(
   body: RejectFriendRequestBody,
 ): Promise<RejectFriendRequestResponse> {
   const { data } = await http.post<RejectFriendRequestResponse>(
-    "/friends/request/reject",
+    "/friends/requests/reject",
     body,
   );
 

@@ -119,6 +119,7 @@ func (deps *Deps) HandleListFriends(w http.ResponseWriter, r *http.Request) {
 		Friends: resp,
 	})
 }
+
 // List friend requests
 
 func (deps *Deps) HandleListFriendRequests(
@@ -190,8 +191,6 @@ func (deps *Deps) HandleListFriendRequests(
 	)
 }
 
-
-//
 func (deps *Deps) HandleSendFriendRequest(w http.ResponseWriter, r *http.Request) {
 	uid, err := deps.mustUserID(r)
 	if err != nil {
@@ -320,18 +319,16 @@ func (deps *Deps) HandleAcceptFriendRequest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	requesterID, err := uuid.Parse(r.PathValue("user_id"))
+	var req AddFriendRequest
+	utils.DecodeJSON(w, r, &req)
+	req.Username = strings.TrimSpace(req.Username)
+
+	requester, err := deps.Queries.GetUserByUsername(r.Context(), req.Username)
 	if err != nil {
-		utils.RespondWithError(
-			w,
-			http.StatusBadRequest,
-			"friends_error",
-			"Invalid user id",
-			"",
-			err,
-		)
+		utils.RespondWithError(w, http.StatusNotFound, "friends_error", "friend request user not found", "", err)
 		return
 	}
+	requesterID := requester.ID
 
 	err = deps.Friends.AcceptFriendRequest(
 		r.Context(),
@@ -375,12 +372,12 @@ func (deps *Deps) HandleAcceptFriendRequest(w http.ResponseWriter, r *http.Reque
 	}
 
 	utils.RespondWithJSON(
-    w,
-    http.StatusOK,
-    map[string]string{
-        "message": "friend request accepted",
-    },
-)
+		w,
+		http.StatusOK,
+		map[string]string{
+			"message": "friend request accepted",
+		},
+	)
 }
 
 func (deps *Deps) HandleRejectFriendRequest(w http.ResponseWriter, r *http.Request) {
@@ -397,18 +394,16 @@ func (deps *Deps) HandleRejectFriendRequest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	requesterID, err := uuid.Parse(r.PathValue("user_id"))
+	var req AddFriendRequest
+	utils.DecodeJSON(w, r, &req)
+	req.Username = strings.TrimSpace(req.Username)
+
+	requester, err := deps.Queries.GetUserByUsername(r.Context(), req.Username)
 	if err != nil {
-		utils.RespondWithError(
-			w,
-			http.StatusBadRequest,
-			"friends_error",
-			"invalid user id",
-			"",
-			err,
-		)
+		utils.RespondWithError(w, http.StatusNotFound, "friends_error", "friend request user not found", "", err)
 		return
 	}
+	requesterID := requester.ID
 
 	err = deps.Friends.RejectFriendRequest(r.Context(), rejecterID, requesterID)
 	if err != nil {

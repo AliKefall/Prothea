@@ -4,6 +4,7 @@ import "./globals.css";
 import { Providers } from "./providers/query-provider";
 import { cn } from "@/lib/utils";
 import { AuthHydrator } from "@/features/auth/auth-hydrator";
+import { Toaster } from "@/components/ui/sonner";
 
 const playfairDisplayHeading = Playfair_Display({subsets:['latin'],variable:'--font-heading'});
 
@@ -32,7 +33,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
     <Providers>
     <AuthHydrator />
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">{children}<Toaster /></body>
     </Providers>
       </html>
   );

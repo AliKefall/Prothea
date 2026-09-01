@@ -41,3 +41,16 @@ export async function getConversationMessages(
 
   return response.data;
 }
+
+export async function createDirectConversation(
+  recipientID: string,
+): Promise<Conversation> {
+  const response = await http.post<Conversation>(
+    "/chat/conversations/direct",
+    {
+      recipient_id: recipientID,
+    },
+  );
+
+  return response.data;
+}

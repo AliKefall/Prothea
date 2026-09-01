@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 )
 
-type Requests struct{
+type Requests struct {
 	Incoming []database.ListIncomingFriendRequestsByUserIDRow
 	Outgoing []database.ListOutgoingFriendRequestsByUserIDRow
 }
@@ -15,7 +15,7 @@ type Requests struct{
 func (s *Service) ListRequests(
 	ctx context.Context,
 	userID uuid.UUID,
-)(*Requests, error){
+) (*Requests, error) {
 	incoming, err := s.queries.ListIncomingFriendRequestsByUserID(
 		ctx,
 		userID,

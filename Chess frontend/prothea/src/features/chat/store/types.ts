@@ -5,12 +5,15 @@ export type ConversationType = "direct" | "group";
 export interface Conversation {
   id: string;
   type: ConversationType;
+  recipient_id?: string;
   created_at: string;
 }
+
 export interface ConversationMember {
   id: string;
   username: string;
 }
+
 export interface ChatMessage {
   id: string;
   conversation_id: string;
@@ -29,7 +32,6 @@ export interface ChatMessageEvent {
   id: string;
   conversation_id: string;
   sender_id: string;
-  recipient_id?: string;
   content: string;
   created_at: string;
 }

@@ -17,8 +17,14 @@ local function mark_removed(user_id)
     removed[user_id] = true
 end
 
--- iterate whole queue once
-local players = redis.call("ZRANGE", queue_key, 0, -1, "WITHSCORES")
+-- Iterate over the queue once.
+local players = redis.call(
+    "ZRANGE",
+    queue_key,
+    0,
+    -1,
+    "WITHSCORES"
+)
 
 for i = 1, #players, 2 do
     if #matches >= limit then
@@ -34,14 +40,18 @@ for i = 1, #players, 2 do
         local joined_at =
             tonumber(redis.call("HGET", p1_key, "joined_at")) or now
 
-        local wait_seconds = math.max(0, now - joined_at)
+        local wait_seconds = math.max(
+            0,
+            now - joined_at
+        )
 
         local rating_window = math.min(
             max_window,
-            base_window + math.floor(wait_seconds / 10) * window_growth
+            base_window
+                + math.floor(wait_seconds / 10) * window_growth
         )
 
-        -- only fetch nearby rating candidates
+        -- Find players inside the current rating window.
         local candidates = redis.call(
             "ZRANGEBYSCORE",
             queue_key,
@@ -59,7 +69,10 @@ for i = 1, #players, 2 do
 
             if p2_id ~= p1_id and not is_removed(p2_id) then
                 local p2_rating = tonumber(candidates[j + 1])
-                local diff = math.abs(p1_rating - p2_rating)
+
+                local diff = math.abs(
+                    p1_rating - p2_rating
+                )
 
                 if best_diff == nil or diff < best_diff then
                     best_id = p2_id
@@ -72,21 +85,36 @@ for i = 1, #players, 2 do
         if best_id ~= nil then
             local p2_key = "matchmaking:user:" .. best_id
 
-            -- only fetch usernames after match found
-            local p1_username = redis.call("HGET", p1_key, "username")
-            local p2_username = redis.call("HGET", p2_key, "username")
+            -- Fetch metadata before deleting it.
+            local p1_username =
+                redis.call("HGET", p1_key, "username") or ""
 
-            -- remove from queue in one command
-            redis.call("ZREM", queue_key, p1_id, best_id)
+            local p2_username =
+                redis.call("HGET", p2_key, "username") or ""
 
-            -- delete metadata in one command
-            redis.call("DEL", p1_key, p2_key)
+            -- Remove both players from the queue.
+            redis.call(
+                "ZREM",
+                queue_key,
+                p1_id,
+                best_id
+            )
+
+            -- Remove matchmaking metadata.
+            redis.call(
+                "DEL",
+                p1_key,
+                p2_key
+            )
 
             mark_removed(p1_id)
             mark_removed(best_id)
 
+            local match_key =
+                p1_id .. ":" .. best_id .. ":" .. tostring(now)
+
             table.insert(matches, {
-                p1_id .. ":" .. best_id .. ":" .. tostring(now),
+                match_key,
                 p1_id,
                 best_id,
                 p1_rating,

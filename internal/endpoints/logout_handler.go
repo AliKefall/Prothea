@@ -14,14 +14,14 @@ import (
 
 const ttl = 7 * 24 * time.Hour
 
-func (deps *Deps) LogoutHandler(w http.ResponseWriter, r *http.Request){
-	ctx, cancel := context.WithTimeout(r.Context(), 5 * time.Second)
+func (deps *Deps) LogoutHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
 	cookie, err := r.Cookie("refresh_token")
-	clearRefreshToken(w,r)
+	clearRefreshToken(w, r)
 
-	if err != nil || cookie.Value == ""{
+	if err != nil || cookie.Value == "" {
 		utils.RespondWithJSON(w, http.StatusOK, map[string]string{
 			"message": "logged out",
 		})
@@ -33,19 +33,18 @@ func (deps *Deps) LogoutHandler(w http.ResponseWriter, r *http.Request){
 
 	err = deps.Queries.RevokeSessionByTokenHash(ctx, database.RevokeSessionByTokenHashParams{
 		RefreshTokenHash: tokenHash,
-		RevokedAt: sql.NullTime{Time: time.Now(), Valid: true},
+		RevokedAt:        sql.NullTime{Time: time.Now(), Valid: true},
 	})
 
-	if err != nil && err != sql.ErrNoRows{
+	if err != nil && err != sql.ErrNoRows {
 		utils.RespondWithError(w, http.StatusInternalServerError, "logout_error", "Logout failed", "", err)
 		return
 	}
 
-	deps.RedisClient.Set(ctx, "bl:" + tokenHash, "1", ttl)
-	deps.RedisClient.Del(ctx, "sess:" + tokenHash)
+	deps.RedisClient.Set(ctx, "bl:"+tokenHash, "1", ttl)
+	deps.RedisClient.Del(ctx, "sess:"+tokenHash)
 
 	utils.RespondWithJSON(w, http.StatusOK, map[string]string{
 		"message": "logged out",
 	})
 }
-

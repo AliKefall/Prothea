@@ -52,7 +52,7 @@ func (s *Service) SendMessage(
 		return database.Message{}, ErrUsersAreNotFriends
 	}
 
-	conversation, err := s.getOrCreateDirectConversation(
+	conversation, err := s.GetOrCreateDirectConversation(
 		ctx,
 		senderID,
 		recipientID,

@@ -40,13 +40,12 @@ func (s *Service) IsConversationMember(
 		},
 	)
 }
-
 func (s *Service) ListConversations(
-	ctx context.Context,
-	userID uuid.UUID,
-) ([]database.Conversation, error) {
-	return s.queries.ListConversations(
-		ctx,
-		userID,
-	)
+    ctx context.Context,
+    userID uuid.UUID,
+) ([]database.ListConversationsRow, error) {
+    return s.queries.ListConversations(
+        ctx,
+        userID,
+    )
 }

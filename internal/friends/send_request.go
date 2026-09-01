@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/AliKefall/prothea/internal/database"
+	"github.com/AliKefall/prothea/internal/websocket"
 	"github.com/google/uuid"
 )
 
@@ -45,6 +46,7 @@ func (s *Service) SendFriendRequest(ctx context.Context, requesterID uuid.UUID, 
 		ctx,
 		database.FriendRequestExistsParams{
 			RequesterID: requesterID,
+			TargetID:    target.ID,
 		},
 	)
 
@@ -73,10 +75,22 @@ func (s *Service) SendFriendRequest(ctx context.Context, requesterID uuid.UUID, 
 		return ErrRequestAlreadyExists
 	}
 
+	requester, err := s.queries.GetUserByID(ctx, requesterID)
+	if err != nil {
+		return err
+	}
+
+	// Backend reference: POST /friends/requests creates the row in sql/queries/friends.sql
+	// and emits websocket.EventSendFriendshipRequest so the frontend can show the request immediately.
+	s.notifyUser(target.ID, websocket.EventSendFriendshipRequest, FriendEventPayload{
+		ID:       requester.ID.String(),
+		Username: requester.Username,
+	})
+
 	return nil
 }
 
-func normalizeFriendPair(a uuid.UUID, b uuid.UUID)(uuid.UUID, uuid.UUID) {
+func normalizeFriendPair(a uuid.UUID, b uuid.UUID) (uuid.UUID, uuid.UUID) {
 	if bytes.Compare(a[:], b[:]) < 0 {
 		return a, b
 	}
