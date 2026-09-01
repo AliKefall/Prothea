@@ -158,7 +158,7 @@ func (w *Worker) findMatches(
 		if err != nil {
 			slog.Error(
 				"matchmaking failed",
-				"time_control", timeControl,
+				"time_control", timeControl.Name,
 				"error", err,
 			)
 			continue
@@ -172,6 +172,43 @@ func (w *Worker) findMatches(
 				"black", match.BlackUsername,
 				"time_control", match.TimeControl,
 			)
+
+			event, err := websocket.NewEvent(
+				websocket.EventMatchFound,
+				match,
+			)
+			if err != nil {
+				slog.Error(
+					"failed to create match event",
+					"match_id", match.ID,
+					"error", err,
+				)
+				continue
+			}
+
+			if err := w.Hub.SendToUser(
+				match.WhiteID.String(),
+				event,
+			); err != nil {
+				slog.Error(
+					"failed to notify white player",
+					"match_id", match.ID,
+					"user_id", match.WhiteID,
+					"error", err,
+				)
+			}
+
+			if err := w.Hub.SendToUser(
+				match.BlackID.String(),
+				event,
+			); err != nil {
+				slog.Error(
+					"failed to notify black player",
+					"match_id", match.ID,
+					"user_id", match.BlackID,
+					"error", err,
+				)
+			}
 		}
 	}
 }

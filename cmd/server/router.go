@@ -97,7 +97,7 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 			deps.HandleCreateDirectConversation,
 		)
 		pr.Post("/matchmaking/enqueue", deps.EnqueueHandler)
-		pr.Post("/matchmaking/dequeue", deps.DequeueHandler)
+		pr.Delete("/matchmaking/dequeue", deps.DequeueHandler)
 	})
 	router.Route("/auth", func(ar chi.Router) {
 		ar.Post("/register", deps.RegisterHandler)
