@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   startMatchmaking,
@@ -8,6 +8,8 @@ import {
 } from "@/features/matchmaking/store/actions";
 
 import { useMatchmakingStore } from "@/features/matchmaking/store/matchmaking-store";
+import { useMatchmakingWebSocket } from "../hooks/use-matchmaking-websocket";
+import { useRouter } from "next/navigation";
 
 const timeControls = {
   Bullet: ["1+0", "1+1", "2+1"],
@@ -16,6 +18,10 @@ const timeControls = {
 };
 
 export default function MatchmakingPanel() {
+  const router = useRouter();
+
+  useMatchmakingWebSocket();
+
   const status = useMatchmakingStore((state) => state.status);
   const timeControl = useMatchmakingStore((state) => state.timeControl);
   const error = useMatchmakingStore((state) => state.error);
@@ -24,6 +30,15 @@ export default function MatchmakingPanel() {
   const [selectedTimeControl, setSelectedTimeControl] = useState("10+0");
 
   const isSearching = status === "searching";
+  const isMatched = status === "matched";
+
+  useEffect(() => {
+    if (!isMatched || !match) {
+      return;
+    }
+
+    router.replace(`/dashboard/chess/${match.id}`)
+  }, [isMatched, match, router]);
 
   async function handleFindGame() {
     await startMatchmaking(selectedTimeControl);
@@ -37,9 +52,7 @@ export default function MatchmakingPanel() {
     <main className="min-h-screen bg-zinc-950 px-6 py-12 text-white">
       <div className="mx-auto w-full max-w-2xl">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold">
-            Find a game
-          </h1>
+          <h1 className="text-3xl font-bold">Find a game</h1>
 
           <p className="mt-2 text-sm text-zinc-400">
             Choose a time control and find an opponent.
@@ -47,9 +60,9 @@ export default function MatchmakingPanel() {
         </div>
 
         {/* Time Controls */}
-        <div className="space-y-6">
-          {Object.entries(timeControls).map(
-            ([category, controls]) => (
+        {!isMatched && (
+          <div className="space-y-6">
+            {Object.entries(timeControls).map(([category, controls]) => (
               <section key={category}>
                 <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-400">
                   {category}
@@ -57,38 +70,30 @@ export default function MatchmakingPanel() {
 
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   {controls.map((control) => {
-                    const selected =
-                      selectedTimeControl === control;
+                    const selected = selectedTimeControl === control;
 
                     return (
                       <button
                         key={control}
                         type="button"
                         disabled={isSearching}
-                        onClick={() =>
-                          setSelectedTimeControl(control)
-                        }
+                        onClick={() => setSelectedTimeControl(control)}
                         className={[
                           "rounded-lg border px-4 py-4 text-left transition",
                           selected
                             ? "border-white bg-white text-black"
                             : "border-zinc-800 bg-zinc-900 text-white hover:border-zinc-600",
-                          isSearching &&
-                            "cursor-not-allowed opacity-50",
+                          isSearching && "cursor-not-allowed opacity-50",
                         ]
                           .filter(Boolean)
                           .join(" ")}
                       >
-                        <div className="text-lg font-semibold">
-                          {control}
-                        </div>
+                        <div className="text-lg font-semibold">{control}</div>
 
                         <div
                           className={[
                             "mt-1 text-xs",
-                            selected
-                              ? "text-zinc-600"
-                              : "text-zinc-500",
+                            selected ? "text-zinc-600" : "text-zinc-500",
                           ].join(" ")}
                         >
                           {control.split("+")[0]} min
@@ -98,9 +103,9 @@ export default function MatchmakingPanel() {
                   })}
                 </div>
               </section>
-            ),
-          )}
-        </div>
+            ))}
+          </div>
+        )}
 
         {/* Searching */}
         {isSearching && (
@@ -109,9 +114,7 @@ export default function MatchmakingPanel() {
               <div className="h-3 w-3 animate-pulse rounded-full bg-green-500" />
 
               <div>
-                <p className="font-semibold">
-                  Searching for an opponent...
-                </p>
+                <p className="font-semibold">Searching for an opponent...</p>
 
                 <p className="mt-1 text-sm text-zinc-500">
                   Time control: {timeControl}
@@ -130,7 +133,7 @@ export default function MatchmakingPanel() {
         )}
 
         {/* Find Game */}
-        {!isSearching && !match && (
+        {!isSearching && !isMatched && !match && (
           <button
             type="button"
             onClick={() => void handleFindGame()}
@@ -148,23 +151,19 @@ export default function MatchmakingPanel() {
         )}
 
         {/* Match Found */}
-        {match && (
+        {isMatched && match && (
           <div className="mt-8 rounded-xl border border-zinc-800 bg-zinc-900 p-6">
             <div className="mb-6 text-center">
               <p className="text-xs font-semibold uppercase tracking-widest text-green-500">
                 Match Found
               </p>
 
-              <p className="mt-2 text-sm text-zinc-500">
-                {match.time_control}
-              </p>
+              <p className="mt-2 text-sm text-zinc-500">{match.time_control}</p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="rounded-lg bg-zinc-950 p-4">
-                <p className="text-sm font-semibold">
-                  {match.white_username}
-                </p>
+                <p className="text-sm font-semibold">{match.white_username}</p>
 
                 <p className="mt-1 text-xs text-zinc-500">
                   Rating {match.white_rating}
@@ -172,14 +171,20 @@ export default function MatchmakingPanel() {
               </div>
 
               <div className="rounded-lg bg-zinc-950 p-4 text-right">
-                <p className="text-sm font-semibold">
-                  {match.black_username}
-                </p>
+                <p className="text-sm font-semibold">{match.black_username}</p>
 
                 <p className="mt-1 text-xs text-zinc-500">
                   Rating {match.black_rating}
                 </p>
               </div>
+            </div>
+
+            <div className="mt-6 rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-3 text-center">
+              <p className="text-xs text-zinc-500">Match ID</p>
+
+              <p className="mt-1 break-all font-mono text-xs text-zinc-300">
+                {match.id}
+              </p>
             </div>
           </div>
         )}

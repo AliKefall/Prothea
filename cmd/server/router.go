@@ -98,6 +98,9 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 		)
 		pr.Post("/matchmaking/enqueue", deps.EnqueueHandler)
 		pr.Delete("/matchmaking/dequeue", deps.DequeueHandler)
+		pr.Get("/matches/{matchId}", deps.GetMatchHandler)
+		pr.Get("/matches/{matchId}/moves", deps.GetMatchMovesHandler)
+
 	})
 	router.Route("/auth", func(ar chi.Router) {
 		ar.Post("/register", deps.RegisterHandler)

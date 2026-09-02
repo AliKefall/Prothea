@@ -55,6 +55,51 @@ func (ns NullConversationType) Value() (driver.Value, error) {
 	return string(ns.ConversationType), nil
 }
 
+type MatchResult string
+
+const (
+	MatchResultPending   MatchResult = "pending"
+	MatchResultWhite     MatchResult = "white"
+	MatchResultBlack     MatchResult = "black"
+	MatchResultDraw      MatchResult = "draw"
+	MatchResultAbandoned MatchResult = "abandoned"
+)
+
+func (e *MatchResult) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = MatchResult(s)
+	case string:
+		*e = MatchResult(s)
+	default:
+		return fmt.Errorf("unsupported scan type for MatchResult: %T", src)
+	}
+	return nil
+}
+
+type NullMatchResult struct {
+	MatchResult MatchResult
+	Valid       bool // Valid is true if MatchResult is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullMatchResult) Scan(value interface{}) error {
+	if value == nil {
+		ns.MatchResult, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.MatchResult.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullMatchResult) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.MatchResult), nil
+}
+
 type RatingType string
 
 const (
@@ -120,6 +165,33 @@ type Friendship struct {
 	UserID    uuid.UUID
 	FriendID  uuid.UUID
 	CreatedAt time.Time
+}
+
+type Match struct {
+	ID                uuid.UUID
+	WhiteID           uuid.UUID
+	BlackID           uuid.UUID
+	TimeControl       string
+	WhiteRatingBefore int32
+	BlackRatingBefore int32
+	WhiteRatingAfter  sql.NullInt32
+	BlackRatingAfter  sql.NullInt32
+	Result            MatchResult
+	CreatedAt         time.Time
+	FinishedAt        sql.NullTime
+}
+
+type MatchMove struct {
+	ID          int64
+	MatchID     uuid.UUID
+	MoveNumber  int32
+	PlayerID    uuid.UUID
+	San         string
+	Uci         string
+	FenAfter    string
+	WhiteTimeMs int64
+	BlackTimeMs int64
+	CreatedAt   time.Time
 }
 
 type Message struct {

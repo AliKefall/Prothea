@@ -42,19 +42,23 @@ class WebSocketManager {
     };
 
     this.socket.onmessage = (event) => {
-      try {
-        const message = JSON.parse(
-          event.data,
-        ) as WebSocketMessage;
+  console.log("[websocket] RAW:", event.data);
 
-        this.emit(message);
-      } catch (error) {
-        console.error(
-          "Failed to parse WebSocket message:",
-          error,
-        );
-      }
-    };
+  try {
+    const message = JSON.parse(
+      event.data,
+    ) as WebSocketMessage;
+
+    console.log("[websocket] PARSED:", message);
+
+    this.emit(message);
+  } catch (error) {
+    console.error(
+      "Failed to parse WebSocket message:",
+      error,
+    );
+  }
+};
 
     this.socket.onclose = (event) => {
       console.log(

@@ -6,3 +6,4 @@ export interface MatchFoundWebSocketEvent {
   type: typeof MATCH_FOUND_EVENT;
   payload: MatchFound;
 }
+

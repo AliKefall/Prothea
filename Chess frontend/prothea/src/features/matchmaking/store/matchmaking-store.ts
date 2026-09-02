@@ -1,8 +1,7 @@
 import { create } from "zustand";
+import { MatchFound } from "./types";
 
-import type { MatchFound } from "./types";
-
-export type MatchmakingStatus = "idle" | "searching" | "error";
+export type MatchmakingStatus = "idle" | "searching" | "matched" | "error";
 
 interface MatchmakingState {
   status: MatchmakingStatus;
@@ -41,7 +40,7 @@ export const useMatchmakingStore = create<MatchmakingState>((set) => ({
 
   setMatch: (match) =>
     set({
-      status: "idle",
+      status: "matched",
       timeControl: match.time_control,
       error: null,
       match,

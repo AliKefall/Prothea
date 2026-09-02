@@ -1,6 +1,7 @@
 import { FriendsPanel } from "@/features/friends/components/friends-panel";
 import { FriendsPanelButton } from "@/features/friends/components/friends-panel-button";
 import { ChatPanel } from "@/features/chat/components/chat-panel";
+import { DashboardSidebar } from "@/components/dashboard-sidebar";
 
 export default function DashboardLayout({
   children,
@@ -12,7 +13,7 @@ export default function DashboardLayout({
       {children}
 
       <ChatPanel />
-
+        <DashboardSidebar />
       <FriendsPanelButton />
       <FriendsPanel />
     </main>

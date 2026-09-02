@@ -7,13 +7,18 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/AliKefall/prothea/internal/game"
 	"github.com/AliKefall/prothea/internal/websocket"
 	"github.com/google/uuid"
 )
 
 type Worker struct {
-	Hub          *websocket.Hub
+	Service     *Service
+	GameService *game.Service
+	Hub         *websocket.Hub
+
 	TimeControls []TimeControl
+
 	PollInterval time.Duration
 	BatchSize    int
 }
@@ -126,10 +131,7 @@ func (s *Service) FindMatches(
 	return matches, nil
 }
 
-func (w *Worker) Run(
-	ctx context.Context,
-	service *Service,
-) {
+func (w *Worker) Run(ctx context.Context) {
 	ticker := time.NewTicker(w.pollInterval())
 	defer ticker.Stop()
 
@@ -139,17 +141,19 @@ func (w *Worker) Run(
 			return
 
 		case <-ticker.C:
-			w.findMatches(ctx, service)
+			w.processMatchMaking(ctx)
 		}
 	}
 }
 
-func (w *Worker) findMatches(
-	ctx context.Context,
-	service *Service,
-) {
+func (w *Worker) processMatchMaking(ctx context.Context) {
+	if w.Service == nil {
+		slog.Error("matchmaking worker service is nil")
+		return
+	}
+
 	for _, timeControl := range w.timeControls() {
-		matches, err := service.FindMatches(
+		matches, err := w.Service.FindMatches(
 			ctx,
 			timeControl.Name,
 			w.batchSize(),
@@ -164,48 +168,103 @@ func (w *Worker) findMatches(
 			continue
 		}
 
-		for _, match := range matches {
+		for _, foundMatch := range matches {
 			slog.Info(
 				"match found",
-				"match_id", match.ID,
-				"white", match.WhiteUsername,
-				"black", match.BlackUsername,
-				"time_control", match.TimeControl,
+				"match_id", foundMatch.ID,
+				"white", foundMatch.WhiteUsername,
+				"black", foundMatch.BlackUsername,
+				"time_control", foundMatch.TimeControl,
 			)
+
+			// Persist the match.
+			if w.GameService == nil {
+				slog.Error(
+					"game service is nil",
+					"match_id", foundMatch.ID,
+				)
+				continue
+			}
+
+			gameMatch := game.Match{
+				ID: foundMatch.ID,
+
+				WhiteID: foundMatch.WhiteID,
+				BlackID: foundMatch.BlackID,
+
+				TimeControl: foundMatch.TimeControl,
+
+				WhiteRatingBefore: foundMatch.WhiteRating,
+				BlackRatingBefore: foundMatch.BlackRating,
+
+				Result:    game.StatusPending,
+				CreatedAt: foundMatch.CreatedAt,
+			}
+
+			createdMatch, err := w.GameService.CreateMatch(
+				ctx,
+				gameMatch,
+			)
+
+			if err != nil {
+				slog.Error(
+					"failed to persist match",
+					"match_id", foundMatch.ID,
+					"error", err,
+				)
+				continue
+			}
+
+			slog.Info(
+				"match persisted",
+				"match_id", createdMatch.ID,
+				"white_id", createdMatch.WhiteID,
+				"black_id", createdMatch.BlackID,
+				"time_control", createdMatch.TimeControl,
+			)
+
+			// Notify both players.
+			if w.Hub == nil {
+				slog.Error(
+					"websocket hub is nil",
+					"match_id", foundMatch.ID,
+				)
+				continue
+			}
 
 			event, err := websocket.NewEvent(
 				websocket.EventMatchFound,
-				match,
+				foundMatch,
 			)
 			if err != nil {
 				slog.Error(
-					"failed to create match event",
-					"match_id", match.ID,
+					"failed to create match found event",
+					"match_id", foundMatch.ID,
 					"error", err,
 				)
 				continue
 			}
 
 			if err := w.Hub.SendToUser(
-				match.WhiteID.String(),
+				foundMatch.WhiteID.String(),
 				event,
 			); err != nil {
 				slog.Error(
 					"failed to notify white player",
-					"match_id", match.ID,
-					"user_id", match.WhiteID,
+					"match_id", foundMatch.ID,
+					"user_id", foundMatch.WhiteID,
 					"error", err,
 				)
 			}
 
 			if err := w.Hub.SendToUser(
-				match.BlackID.String(),
+				foundMatch.BlackID.String(),
 				event,
 			); err != nil {
 				slog.Error(
 					"failed to notify black player",
-					"match_id", match.ID,
-					"user_id", match.BlackID,
+					"match_id", foundMatch.ID,
+					"user_id", foundMatch.BlackID,
 					"error", err,
 				)
 			}

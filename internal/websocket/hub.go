@@ -1,6 +1,8 @@
 package websocket
 
 import (
+	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 )
@@ -83,17 +85,44 @@ func (h *Hub) SendToUser(
 	event Event,
 ) error {
 	h.mu.RLock()
-
 	defer h.mu.RUnlock()
+
+	found := false
 
 	for client := range h.clients {
 		if client.UserID != userID {
 			continue
 		}
 
+		found = true
+
+		slog.Info(
+			"sending websocket event",
+			"user_id", userID,
+			"event_type", event.Type,
+		)
+
 		if err := client.SendEvent(event); err != nil {
+			slog.Error(
+				"failed to send websocket event",
+				"user_id", userID,
+				"event_type", event.Type,
+				"error", err,
+			)
+
 			return err
 		}
+
+		slog.Info(
+			"websocket event sent",
+			"user_id", userID,
+			"event_type", event.Type,
+		)
 	}
+
+	if !found {
+		return fmt.Errorf("user %s is not connected", userID)
+	}
+
 	return nil
 }

@@ -3,17 +3,19 @@ package main
 import (
 	"context"
 	"database/sql"
+	"log"
+	"time"
+
 	"github.com/AliKefall/prothea/internal/auth"
 	"github.com/AliKefall/prothea/internal/chat"
 	"github.com/AliKefall/prothea/internal/database"
 	"github.com/AliKefall/prothea/internal/endpoints"
 	"github.com/AliKefall/prothea/internal/friends"
+	"github.com/AliKefall/prothea/internal/game"
 	"github.com/AliKefall/prothea/internal/matchmaking"
 	"github.com/AliKefall/prothea/internal/websocket"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/redis/go-redis/v9"
-	"log"
-	"time"
 )
 
 type serverDependencies struct {
@@ -35,6 +37,7 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 	hub.Register(websocket.EventChatSend, chatService.HandleSendMessage)
 
 	matchmakingService := matchmaking.NewMatchmakingService(redisClient)
+	gameService := game.NewService(conn, queries)
 
 	deps := &endpoints.Deps{
 		DB:          conn,
@@ -46,6 +49,7 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 		Matchmaking: matchmakingService,
 		Hub:         hub,
 		Chat:        chatService,
+		Game:        gameService,
 	}
 
 	return conn, serverDependencies{

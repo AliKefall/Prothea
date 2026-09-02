@@ -8,6 +8,7 @@ import (
 	"github.com/AliKefall/prothea/internal/chat"
 	"github.com/AliKefall/prothea/internal/database"
 	"github.com/AliKefall/prothea/internal/friends"
+	"github.com/AliKefall/prothea/internal/game"
 	"github.com/AliKefall/prothea/internal/matchmaking"
 	"github.com/AliKefall/prothea/internal/websocket"
 	"github.com/redis/go-redis/v9"
@@ -23,6 +24,7 @@ type Deps struct {
 	Matchmaking *matchmaking.Service
 	Hub         *websocket.Hub
 	Chat        *chat.Service
+	Game *game.Service
 }
 
 func (deps *Deps) MustUserIDString(r *http.Request) (string, error) {

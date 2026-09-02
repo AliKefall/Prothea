@@ -9,12 +9,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/AliKefall/prothea/internal/game"
 	"github.com/AliKefall/prothea/internal/matchmaking"
 	"github.com/joho/godotenv"
 )
 
-// NOTE: Write a decent bootstrap for services.
-// Also write more readeble code for the f sake
 func main() {
 	godotenv.Load()
 
@@ -30,18 +29,25 @@ func main() {
 	// WebSocket hub
 	go deps.hub.Run(ctx)
 
+	// Game service
+	gameService := game.NewService(
+		conn,
+		deps.deps.Queries,
+	)
+
 	// Matchmaking worker
 	matchmakingWorker := &matchmaking.Worker{
-		Hub:          deps.hub,
+		Service:     deps.deps.Matchmaking,
+		GameService: gameService,
+		Hub:         deps.hub,
+
 		TimeControls: matchmaking.SupportedTimeControls,
+
 		PollInterval: matchmaking.DefaultPollInterval,
 		BatchSize:    matchmaking.DefaultMatchBatchSize,
 	}
 
-	go matchmakingWorker.Run(
-		ctx,
-		deps.deps.Matchmaking,
-	)
+	go matchmakingWorker.Run(ctx)
 
 	server := &http.Server{
 		Addr:              ":" + config.Port,
@@ -65,21 +71,32 @@ func main() {
 
 	cancel()
 }
+
 func serverShutdown(srv *http.Server) {
 	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop // This channel only works if it is in the main function
+
+	signal.Notify(
+		stop,
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+
+	<-stop
 
 	log.Println("Shutting down the server...")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		5*time.Second,
+	)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("Shutdown error: %v", err)
-
 		_ = srv.Close()
 	}
 
 	signal.Stop(stop)
+
 	log.Println("Server stopped cleanly")
 }

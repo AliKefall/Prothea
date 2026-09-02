@@ -13,8 +13,8 @@ export function useLogout() {
       clearSession();
     },
     onError: () => {
-        websocketManager.disconnect();
-        clearSession();
-    }
+      websocketManager.disconnect();
+      clearSession();
+    },
   });
 }
