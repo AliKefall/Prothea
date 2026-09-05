@@ -239,7 +239,7 @@ WHERE m.id = $1
   AND (
       m.white_id = $2
       OR m.black_id = $2
-  )
+)
 `
 
 type GetMatchDetailsForPlayerParams struct {

@@ -4,6 +4,8 @@ go 1.25.0
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/corentings/chess v0.0.0-20241113092200-3f44c4e3e959 // indirect
+	github.com/corentings/chess/v2 v2.6.0 // indirect
 	github.com/go-chi/chi/v5 v5.3.2 // indirect
 	github.com/go-chi/cors v1.2.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect

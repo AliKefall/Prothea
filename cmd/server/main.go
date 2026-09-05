@@ -9,9 +9,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/AliKefall/prothea/internal/game"
 	"github.com/AliKefall/prothea/internal/matchmaking"
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -29,16 +29,10 @@ func main() {
 	// WebSocket hub
 	go deps.hub.Run(ctx)
 
-	// Game service
-	gameService := game.NewService(
-		conn,
-		deps.deps.Queries,
-	)
-
 	// Matchmaking worker
 	matchmakingWorker := &matchmaking.Worker{
 		Service:     deps.deps.Matchmaking,
-		GameService: gameService,
+		GameService: deps.deps.Game,
 		Hub:         deps.hub,
 
 		TimeControls: matchmaking.SupportedTimeControls,
@@ -67,12 +61,12 @@ func main() {
 		}
 	}()
 
-	serverShutdown(server)
+	serverShutdown(server, deps.redis)
 
 	cancel()
 }
 
-func serverShutdown(srv *http.Server) {
+func serverShutdown(srv *http.Server, redisClient *redis.Client) {
 	stop := make(chan os.Signal, 1)
 
 	signal.Notify(
@@ -90,6 +84,12 @@ func serverShutdown(srv *http.Server) {
 		5*time.Second,
 	)
 	defer cancel()
+
+	if err := redisClient.FlushDB(ctx).Err(); err != nil {
+		log.Printf("redis cleanup failed: %v", err)
+	} else {
+		log.Println("redis database cleaned")
+	}
 
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("Shutdown error: %v", err)

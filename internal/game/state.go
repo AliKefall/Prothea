@@ -3,6 +3,7 @@ package game
 import (
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -10,6 +11,8 @@ import (
 var (
 	ErrGameStateNotFound = errors.New("game state not found")
 	ErrInvalidTurn       = errors.New("invalid turn")
+	ErrInvalidGameTime   = errors.New("invalid game time")
+	ErrGameTimeExpired   = errors.New("game time expired")
 )
 
 type Color string
@@ -19,18 +22,30 @@ const (
 	ColorBlack Color = "b"
 )
 
+type StateStatus string
+
+const (
+	StateActive    StateStatus = "active"
+	StateFinished  StateStatus = "finished"
+	StateAbandoned StateStatus = "abandoned"
+)
+
 type State struct {
 	MatchID uuid.UUID
 
 	WhiteID uuid.UUID
 	BlackID uuid.UUID
 
-	FEN string
-
-	Turn Color
+	FEN    string
+	Turn   Color
+	Status StateStatus
 
 	WhiteTimeMs int64
 	BlackTimeMs int64
+
+	IncrementMs int64
+
+	LastMoveAt time.Time
 
 	mu sync.RWMutex
 }
@@ -57,22 +72,68 @@ func (s *State) IsPlayerTurn(playerID uuid.UUID) bool {
 	return s.currentPlayerID() == playerID
 }
 
-func (s *State) ApplyTurn(
+func (s *State) IsActive() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.Status == StateActive
+}
+
+func (s *State) ApplyMove(
 	playerID uuid.UUID,
 	fen string,
-	whiteTimeMs int64,
-	blackTimeMs int64,
+	now time.Time,
 ) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if s.Status != StateActive {
+		return ErrGameNotActive
+	}
 
 	if playerID != s.currentPlayerID() {
 		return ErrInvalidTurn
 	}
 
+	elapsedMs := now.Sub(s.LastMoveAt).Milliseconds()
+
+	if elapsedMs < 0 {
+		return ErrInvalidGameTime
+	}
+
+	switch s.Turn {
+	case ColorWhite:
+		s.WhiteTimeMs -= elapsedMs
+
+		if s.WhiteTimeMs <= 0 {
+			s.WhiteTimeMs = 0
+			s.LastMoveAt = now
+			s.Status = StateFinished
+
+			return ErrGameTimeExpired
+		}
+
+		s.WhiteTimeMs += s.IncrementMs
+
+	case ColorBlack:
+		s.BlackTimeMs -= elapsedMs
+
+		if s.BlackTimeMs <= 0 {
+			s.BlackTimeMs = 0
+			s.LastMoveAt = now
+			s.Status = StateFinished
+
+			return ErrGameTimeExpired
+		}
+
+		s.BlackTimeMs += s.IncrementMs
+
+	default:
+		return ErrInvalidTurn
+	}
+
 	s.FEN = fen
-	s.WhiteTimeMs = whiteTimeMs
-	s.BlackTimeMs = blackTimeMs
+	s.LastMoveAt = now
 
 	if s.Turn == ColorWhite {
 		s.Turn = ColorBlack
@@ -81,4 +142,18 @@ func (s *State) ApplyTurn(
 	}
 
 	return nil
+}
+
+func (s *State) Finish() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.Status = StateFinished
+}
+
+func (s *State) Abandon() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.Status = StateAbandoned
 }

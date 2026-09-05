@@ -1,18 +1,69 @@
 "use client";
 
-import { useState } from "react";
-import { Chess } from "chess.js";
-import { Chessboard, PieceDropHandlerArgs } from "react-chessboard";
+import { useEffect, useMemo, useState } from "react";
+import { Chess, type Square } from "chess.js";
+import { Chessboard, type PieceDropHandlerArgs } from "react-chessboard";
 
 import { useAuthStore } from "@/features/auth/auth-store";
-import { useMatch } from "../hooks/use-match";
-import { useMatchMoves } from "../hooks/use-match-moves";
 import { websocketManager } from "@/lib/websocket";
 
-const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
+import { useMatch } from "../hooks/use-match";
+import { useMatchMoves } from "../hooks/use-match-moves";
+
+const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 interface ChessBoardProps {
   matchId: string;
+}
+
+interface GameMovePayload {
+  match_id: string;
+  move_number: number;
+  player_id: string;
+  from: string;
+  to: string;
+  promotion?: string;
+  uci: string;
+  san: string;
+  fen_after: string;
+  white_time_ms: number;
+  black_time_ms: number;
+  last_move_at: string;
+}
+
+interface WebSocketGameMoveMessage {
+  type: string;
+  payload: GameMovePayload;
+}
+
+interface ClockSnapshot {
+  whiteTimeMs: number;
+  blackTimeMs: number;
+  lastMoveAt: number | null;
+}
+
+function parseInitialTimeMs(timeControl: string | undefined): number {
+  if (!timeControl) {
+    return 0;
+  }
+
+  const [minutes] = timeControl.split("+");
+  const parsedMinutes = Number(minutes);
+
+  if (!Number.isFinite(parsedMinutes) || parsedMinutes <= 0) {
+    return 0;
+  }
+
+  return parsedMinutes * 60 * 1000;
+}
+
+function formatClock(timeMs: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(timeMs / 1000));
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 export function ChessBoard({ matchId }: ChessBoardProps) {
@@ -24,11 +75,217 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     isError: isMatchError,
   } = useMatch(matchId);
 
-  const { data: moves = [], isLoading: isMovesLoading } =
-    useMatchMoves(matchId);
+  const { data: movesData, isLoading: isMovesLoading } = useMatchMoves(matchId);
 
-  const [position, setPosition] = useState(STARTING_FEN);
-  const [game] = useState(() => new Chess());
+  /*
+   * movesData undefined olduğunda her render'da yeni []
+   * oluşturmamak için useMemo kullanıyoruz.
+   */
+  const moves = useMemo(() => {
+    return movesData ?? [];
+  }, [movesData]);
+
+  /*
+   * HTTP üzerinden gelen son FEN.
+   *
+   * Henüz hamle yoksa başlangıç pozisyonu kullanılır.
+   */
+  const latestPosition = useMemo(() => {
+    if (moves.length === 0) {
+      return STARTING_FEN;
+    }
+
+    return moves[moves.length - 1].fen_after;
+  }, [moves]);
+
+  /*
+   * WebSocket üzerinden gelen en son authoritative position.
+   */
+  const [livePosition, setLivePosition] = useState<string | null>(null);
+
+  /*
+   * WebSocket üzerinden gelen en son authoritative clock.
+   */
+  const [clockSnapshot, setClockSnapshot] = useState<ClockSnapshot | null>(
+    null,
+  );
+
+  /*
+   * Frontend clock'un "şu anı".
+   */
+  const [clockNow, setClockNow] = useState(() => Date.now());
+
+  /*
+   * Live position varsa onu kullan.
+   * Yoksa REST API'den gelen son pozisyonu kullan.
+   */
+  const position = livePosition ?? latestPosition;
+
+  /*
+   * Chess instance state olarak tutulmuyor.
+   * Position değiştikçe yeniden oluşturuluyor.
+   */
+  const game = useMemo(() => {
+    return new Chess(position);
+  }, [position]);
+
+  /*
+   * Maçın başlangıç süresi.
+   *
+   * Örneğin:
+   * 10+0 -> 600000 ms
+   * 5+3  -> 300000 ms
+   */
+  const initialTimeMs = useMemo(() => {
+    return parseInitialTimeMs(match?.time_control);
+  }, [match?.time_control]);
+
+  /*
+   * Sayfa yeniden açıldığında REST API'den alınan
+   * mevcut clock snapshot'ını oluştur.
+   *
+   * Henüz hamle yoksa saat çalışmaz.
+   *
+   * Hamle varsa son hamlenin oluşturulma zamanı,
+   * backend snapshot'ının zamanına yaklaşık referans olur.
+   */
+  const baseClock = useMemo<ClockSnapshot>(() => {
+    const lastMove = moves[moves.length - 1];
+
+    if (!lastMove) {
+      return {
+        whiteTimeMs: initialTimeMs,
+        blackTimeMs: initialTimeMs,
+        lastMoveAt: null,
+      };
+    }
+
+    const lastMoveAt = Date.parse(lastMove.created_at);
+
+    return {
+      whiteTimeMs: lastMove.white_time_ms,
+      blackTimeMs: lastMove.black_time_ms,
+      lastMoveAt: Number.isFinite(lastMoveAt) ? lastMoveAt : null,
+    };
+  }, [moves, initialTimeMs]);
+
+  const effectiveClock = clockSnapshot ?? baseClock;
+
+  /*
+   * Clock sadece oyun devam ederken çalışıyor.
+   *
+   * 250 ms'de bir UI güncelleniyor.
+   * Gerçek saat backend'de authoritative.
+   */
+  useEffect(() => {
+    if (match?.result !== "pending" || effectiveClock.lastMoveAt === null) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setClockNow(Date.now());
+    }, 250);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [match?.result, effectiveClock.lastMoveAt]);
+
+  /*
+   * Backend'den game_move eventlerini dinle.
+   */
+  useEffect(() => {
+    function handleMessage(message: unknown) {
+      if (
+        typeof message !== "object" ||
+        message === null ||
+        !("type" in message) ||
+        !("payload" in message)
+      ) {
+        return;
+      }
+
+      const wsMessage = message as WebSocketGameMoveMessage;
+
+      if (wsMessage.type !== "game_move") {
+        return;
+      }
+
+      const payload = wsMessage.payload;
+
+      if (!payload || payload.match_id !== matchId) {
+        return;
+      }
+
+      const lastMoveAt = Date.parse(payload.last_move_at);
+
+      if (!Number.isFinite(lastMoveAt)) {
+        console.error(
+          "Invalid last_move_at received from server:",
+          payload.last_move_at,
+        );
+
+        return;
+      }
+
+      try {
+        /*
+         * Backend'in gönderdiği FEN geçerli mi?
+         */
+        new Chess(payload.fen_after);
+
+        /*
+         * Backend authoritative position.
+         */
+        setLivePosition(payload.fen_after);
+
+        /*
+         * Backend authoritative clock.
+         */
+        setClockSnapshot({
+          whiteTimeMs: payload.white_time_ms,
+          blackTimeMs: payload.black_time_ms,
+          lastMoveAt,
+        });
+
+        /*
+         * Event geldiği anda clockNow'u güncelle.
+         */
+        setClockNow(Date.now());
+      } catch (error) {
+        console.error("Failed to apply websocket chess move:", error);
+      }
+    }
+
+    const unsubscribe = websocketManager.subscribe(handleMessage);
+
+    return unsubscribe;
+  }, [matchId]);
+
+  /*
+   * Oyuncuların ekranda göreceği gerçek saatler.
+   *
+   * İlk hamleden önce elapsedMs = 0.
+   *
+   * Hamle yapıldıktan sonra sadece sıradaki oyuncunun
+   * zamanı azalır.
+   */
+  const elapsedMs =
+    effectiveClock.lastMoveAt === null
+      ? 0
+      : Math.max(0, clockNow - effectiveClock.lastMoveAt);
+
+  const isWhiteTurn = game.turn() === "w";
+
+  const whiteDisplayTime = Math.max(
+    0,
+    effectiveClock.whiteTimeMs - (isWhiteTurn ? elapsedMs : 0),
+  );
+
+  const blackDisplayTime = Math.max(
+    0,
+    effectiveClock.blackTimeMs - (!isWhiteTurn ? elapsedMs : 0),
+  );
 
   if (isMatchLoading) {
     return (
@@ -54,6 +311,8 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
 
   const isWhite = match.white_id === user.user_id;
 
+  const myColor = isWhite ? "w" : "b";
+
   const myUsername = isWhite ? match.white_username : match.black_username;
 
   const myRating = isWhite ? match.white_rating : match.black_rating;
@@ -72,8 +331,48 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
       return false;
     }
 
+    /*
+     * Oyun bitmişse hamle gönderme.
+     */
+    if (match?.result !== "pending") {
+      return false;
+    }
+
+    /*
+     * Source square üzerinde gerçekten taş var mı?
+     */
+    const piece = game.get(sourceSquare as Square);
+
+    if (!piece) {
+      return false;
+    }
+
+    /*
+     * Oyuncu sadece kendi taşını oynayabilir.
+     */
+    if (piece.color !== myColor) {
+      return false;
+    }
+
+    /*
+     * Oyuncunun sırası değilse frontend'de engelle.
+     *
+     * Backend bunu ayrıca kontrol ediyor.
+     */
+    if (game.turn() !== myColor) {
+      return false;
+    }
+
     try {
-      const move = game.move({
+      /*
+       * Gerçek game instance'ını değiştirmiyoruz.
+       *
+       * Sadece hamlenin legal olup olmadığını
+       * kontrol etmek için kopya kullanıyoruz.
+       */
+      const nextGame = new Chess(game.fen());
+
+      const move = nextGame.move({
         from: sourceSquare,
         to: targetSquare,
         promotion: "q",
@@ -83,15 +382,22 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
         return false;
       }
 
-      setPosition(game.fen());
+      const uci = `${sourceSquare}${targetSquare}` + `${move.promotion ?? ""}`;
 
-      const uci = `${sourceSquare}${targetSquare}${move.promotion ?? ""}`;
-
+      /*
+       * Hamleyi backend'e gönder.
+       *
+       * Board henüz local olarak değiştirilmez.
+       *
+       * Backend kabul ederse game_move eventini
+       * bize gönderir ve FEN authoritative olarak
+       * uygulanır.
+       */
       websocketManager.send("game_move", {
         match_id: matchId,
         from: sourceSquare,
         to: targetSquare,
-        promotion: move.promotion,
+        promotion: move.promotion ?? "",
         uci,
       });
 
@@ -124,7 +430,9 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
               </div>
 
               <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2">
-                <span className="font-mono text-xl font-bold">10:00</span>
+                <span className="font-mono text-xl font-bold">
+                  {formatClock(isWhite ? blackDisplayTime : whiteDisplayTime)}
+                </span>
               </div>
             </div>
 
@@ -155,7 +463,9 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
               </div>
 
               <div className="rounded-lg bg-white px-4 py-2 text-black">
-                <span className="font-mono text-xl font-bold">10:00</span>
+                <span className="font-mono text-xl font-bold">
+                  {formatClock(isWhite ? whiteDisplayTime : blackDisplayTime)}
+                </span>
               </div>
             </div>
 
@@ -166,6 +476,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
 
           {/* Side panel */}
           <aside className="flex h-130 flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900">
+            {/* Header */}
             <div className="border-b border-zinc-800 px-5 py-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -182,6 +493,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
               </div>
             </div>
 
+            {/* Moves */}
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
               {isMovesLoading ? (
                 <div className="flex h-full items-center justify-center">
@@ -193,6 +505,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                 </div>
               ) : (
                 <div className="overflow-hidden rounded-lg border border-zinc-800">
+                  {/* Header */}
                   <div className="grid grid-cols-[36px_1fr_1fr] bg-zinc-950 text-xs text-zinc-500">
                     <div className="px-3 py-2">#</div>
 
@@ -201,6 +514,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                     <div className="px-3 py-2">Black</div>
                   </div>
 
+                  {/* Moves */}
                   {Array.from(
                     {
                       length: Math.ceil(moves.length / 2),
@@ -244,6 +558,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
               )}
             </div>
 
+            {/* Controls */}
             <div className="border-t border-zinc-800 p-4">
               <div className="grid grid-cols-2 gap-2">
                 <button

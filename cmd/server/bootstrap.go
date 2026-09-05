@@ -9,6 +9,7 @@ import (
 	"github.com/AliKefall/prothea/internal/auth"
 	"github.com/AliKefall/prothea/internal/chat"
 	"github.com/AliKefall/prothea/internal/database"
+	"github.com/AliKefall/prothea/internal/elo"
 	"github.com/AliKefall/prothea/internal/endpoints"
 	"github.com/AliKefall/prothea/internal/friends"
 	"github.com/AliKefall/prothea/internal/game"
@@ -25,6 +26,8 @@ type serverDependencies struct {
 	redis   *redis.Client
 }
 
+//NOTE: Tidy up this place
+
 func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 	conn := mustOpenDatabase(config)
 	queries := database.New(conn)
@@ -34,10 +37,32 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 	hub := websocket.NewHub()
 
 	chatService := chat.NewService(conn, queries, hub)
-	hub.Register(websocket.EventChatSend, chatService.HandleSendMessage)
+	hub.Register(
+		websocket.EventChatSend,
+		chatService.HandleSendMessage,
+	)
 
 	matchmakingService := matchmaking.NewMatchmakingService(redisClient)
-	gameService := game.NewService(conn, queries)
+
+	gameStateStore := game.NewRedisStateStore(redisClient)
+	gameLock := game.NewRedisGameLock(redisClient)
+
+	eloRepository := elo.NewRepository(conn, queries)
+
+	eloService := elo.NewService(eloRepository)
+	gameService := game.NewService(
+		conn,
+		queries,
+		gameStateStore,
+		game.NewChessValidator(),
+		gameLock,
+		eloService,
+	)
+
+	hub.Register(
+		websocket.EventGameMove,
+		gameService.HandleMove,
+	)
 
 	deps := &endpoints.Deps{
 		DB:          conn,

@@ -31,6 +31,58 @@ func (q *Queries) CreatePlayerRatings(ctx context.Context, userID uuid.UUID) err
 	return err
 }
 
+const createRatingHistory = `-- name: CreateRatingHistory :exec
+INSERT INTO rating_history (
+    user_id,
+    match_id,
+    rating_type,
+    old_rating,
+    new_rating,
+    old_rd,
+    new_rd,
+    old_volatility,
+    new_volatility
+)
+VALUES (
+    $1,
+    $2,
+    $3,
+    $4,
+    $5,
+    $6,
+    $7,
+    $8,
+    $9
+)
+`
+
+type CreateRatingHistoryParams struct {
+	UserID        uuid.UUID
+	MatchID       uuid.UUID
+	RatingType    RatingType
+	OldRating     float64
+	NewRating     float64
+	OldRd         float64
+	NewRd         float64
+	OldVolatility float64
+	NewVolatility float64
+}
+
+func (q *Queries) CreateRatingHistory(ctx context.Context, arg CreateRatingHistoryParams) error {
+	_, err := q.db.ExecContext(ctx, createRatingHistory,
+		arg.UserID,
+		arg.MatchID,
+		arg.RatingType,
+		arg.OldRating,
+		arg.NewRating,
+		arg.OldRd,
+		arg.NewRd,
+		arg.OldVolatility,
+		arg.NewVolatility,
+	)
+	return err
+}
+
 const getMatchRatingHistory = `-- name: GetMatchRatingHistory :many
 SELECT
     id,

@@ -14,7 +14,7 @@ type StateStore interface {
 
 	Set(
 		ctx context.Context,
-		matchID uuid.UUID,
+		state *State,
 	) error
 
 	Delete(

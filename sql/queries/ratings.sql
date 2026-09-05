@@ -97,3 +97,27 @@ SELECT
 FROM rating_history
 WHERE match_id = $1
 ORDER BY user_id, rating_type;
+
+-- name: CreateRatingHistory :exec
+INSERT INTO rating_history (
+    user_id,
+    match_id,
+    rating_type,
+    old_rating,
+    new_rating,
+    old_rd,
+    new_rd,
+    old_volatility,
+    new_volatility
+)
+VALUES (
+    $1,
+    $2,
+    $3,
+    $4,
+    $5,
+    $6,
+    $7,
+    $8,
+    $9
+);

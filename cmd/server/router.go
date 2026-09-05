@@ -128,7 +128,7 @@ func securityHeaderMiddleware(next http.Handler) http.Handler {
 }
 
 // Helpers for logging
-
+// NOTE: later this can be carried over to prometheus. absolutely not now.
 func requestIDResponseHeaderMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if requestID := middleware.GetReqID(r.Context()); requestID != "" {
