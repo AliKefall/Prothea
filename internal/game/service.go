@@ -590,6 +590,141 @@ func (s *Service) ApplyMove(
 	}, nil
 }
 
+func (s *Service) FinishGame(
+	ctx context.Context,
+	state *State,
+	result database.MatchResult,
+	reason string,
+) (FinishResult, error) {
+	if s == nil {
+		return FinishResult{}, errors.New("game service is nil")
+	}
+
+	if state == nil {
+		return FinishResult{}, ErrGameStateNotFound
+	}
+
+	if s.EloService == nil {
+		return FinishResult{}, errors.New(
+			"elo service is not initialized",
+		)
+	}
+
+	if s.StateStore == nil {
+		return FinishResult{}, errors.New(
+			"game state store is not initialized",
+		)
+	}
+
+	match, err := s.GetMatch(
+		ctx,
+		state.MatchID,
+	)
+	if err != nil {
+		return FinishResult{}, err
+	}
+
+	ratingType, err := elo.RatingTypeFromTimeControl(
+		match.TimeControl,
+	)
+	if err != nil {
+		return FinishResult{}, err
+	}
+
+	var eloResult elo.Result
+
+	switch result {
+	case database.MatchResultWhite:
+		eloResult = elo.ResultWhiteWin
+
+	case database.MatchResultBlack:
+		eloResult = elo.ResultBlackWin
+
+	case database.MatchResultDraw:
+		eloResult = elo.ResultDraw
+
+	default:
+		return FinishResult{}, errors.New(
+			"invalid game finish result",
+		)
+	}
+
+	ratings, err := s.EloService.UpdateMatch(
+		ctx,
+		state.MatchID,
+		state.WhiteID,
+		state.BlackID,
+		ratingType,
+		eloResult,
+	)
+	if err != nil {
+		return FinishResult{}, err
+	}
+
+	whiteRatingBefore := int(
+		math.Round(ratings.WhiteBefore.Value),
+	)
+
+	whiteRatingAfter := int(
+		math.Round(ratings.WhiteAfter.Value),
+	)
+
+	blackRatingBefore := int(
+		math.Round(ratings.BlackBefore.Value),
+	)
+
+	blackRatingAfter := int(
+		math.Round(ratings.BlackAfter.Value),
+	)
+
+	if _, err := s.FinishMatch(
+		ctx,
+		state.MatchID,
+		result,
+		&whiteRatingAfter,
+		&blackRatingAfter,
+	); err != nil {
+		return FinishResult{}, err
+	}
+
+	state.Finish()
+
+	if err := s.StateStore.Set(
+		ctx,
+		state,
+	); err != nil {
+		return FinishResult{}, err
+	}
+
+	var winnerID uuid.UUID
+	var loserID uuid.UUID
+
+	switch result {
+	case database.MatchResultWhite:
+		winnerID = state.WhiteID
+		loserID = state.BlackID
+
+	case database.MatchResultBlack:
+		winnerID = state.BlackID
+		loserID = state.WhiteID
+	}
+
+	return FinishResult{
+		Result: result,
+
+		WinnerID: winnerID,
+		LoserID:  loserID,
+
+		Reason: reason,
+
+		WhiteRatingBefore: whiteRatingBefore,
+		WhiteRatingAfter:  whiteRatingAfter,
+
+		BlackRatingBefore: blackRatingBefore,
+		BlackRatingAfter:  blackRatingAfter,
+	}, nil
+}
+
 // parseTimeControl converts a chess time control such as "10+5"
 // into initial time and increment values in milliseconds.
 //

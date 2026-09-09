@@ -9,8 +9,12 @@ import { websocketManager } from "@/lib/websocket";
 
 import { useMatch } from "../hooks/use-match";
 import { useMatchMoves } from "../hooks/use-match-moves";
+import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
 const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+//NOTE: Tidy up this place, types and game logic must be sepearated.
+//This one stays like this just for testing rn
 
 interface ChessBoardProps {
   matchId: string;
@@ -34,6 +38,30 @@ interface GameMovePayload {
 interface WebSocketGameMoveMessage {
   type: string;
   payload: GameMovePayload;
+}
+
+interface GameFinishedPayload {
+  match_id: string;
+
+  result: "white" | "black" | "draw" | "abandoned";
+
+  winner_id: string;
+  loser_id: string;
+
+  reason: string;
+
+  white_rating_before: number;
+  white_rating_after: number;
+
+  black_rating_before: number;
+  black_rating_after: number;
+
+  created_at: string;
+}
+
+interface WebSocketGameFinishedMessage {
+  type: "game_finished";
+  payload: GameFinishedPayload;
 }
 
 interface ClockSnapshot {
@@ -68,6 +96,7 @@ function formatClock(timeMs: number): string {
 
 export function ChessBoard({ matchId }: ChessBoardProps) {
   const user = useAuthStore((state) => state.user);
+  const queryClient = useQueryClient();
 
   const {
     data: match,
@@ -78,17 +107,16 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
   const { data: movesData, isLoading: isMovesLoading } = useMatchMoves(matchId);
 
   /*
-   * movesData undefined olduğunda her render'da yeni []
-   * oluşturmamak için useMemo kullanıyoruz.
+   * Memoize the fallback array so an undefined query result
+   * does not produce a new reference during every render.
    */
   const moves = useMemo(() => {
     return movesData ?? [];
   }, [movesData]);
 
   /*
-   * HTTP üzerinden gelen son FEN.
-   *
-   * Henüz hamle yoksa başlangıç pozisyonu kullanılır.
+   * REST gives us the latest persisted board position.
+   * The initial FEN is used until the first move exists.
    */
   const latestPosition = useMemo(() => {
     if (moves.length === 0) {
@@ -99,40 +127,57 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
   }, [moves]);
 
   /*
-   * WebSocket üzerinden gelen en son authoritative position.
+   * WebSocket updates may arrive after the initial HTTP request.
+   * This state stores the newest server-authoritative position.
    */
   const [livePosition, setLivePosition] = useState<string | null>(null);
 
   /*
-   * WebSocket üzerinden gelen en son authoritative clock.
+   * Keep the latest clock snapshot received from the backend.
+   * The client derives the visible countdown from this anchor.
    */
   const [clockSnapshot, setClockSnapshot] = useState<ClockSnapshot | null>(
     null,
   );
 
   /*
-   * Frontend clock'un "şu anı".
+   * This timestamp drives the visual clock only.
+   * Actual game time is still controlled by the backend.
    */
   const [clockNow, setClockNow] = useState(() => Date.now());
 
   /*
-   * Live position varsa onu kullan.
-   * Yoksa REST API'den gelen son pozisyonu kullan.
+   * A finished flag prevents new local interactions after the
+   * server declares the match over.
+   */
+  const [gameFinished, setGameFinished] = useState(false);
+
+  /*
+   * Store the complete finish payload so the UI can display
+   * the final result and updated ratings.
+   */
+  const [finishResult, setFinishResult] = useState<GameFinishedPayload | null>(
+    null,
+  );
+
+  /*
+   * Prefer the live server position when one is available.
+   * Otherwise fall back to the latest persisted board state.
    */
   const position = livePosition ?? latestPosition;
 
   /*
-   * Chess instance state olarak tutulmuyor.
-   * Position değiştikçe yeniden oluşturuluyor.
+   * Chess.js is derived from the current FEN rather than stored
+   * as mutable React state.
    */
   const game = useMemo(() => {
     return new Chess(position);
   }, [position]);
 
   /*
-   * Maçın başlangıç süresi.
+   * Convert the match time control into milliseconds.
    *
-   * Örneğin:
+   * Examples:
    * 10+0 -> 600000 ms
    * 5+3  -> 300000 ms
    */
@@ -141,13 +186,11 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
   }, [match?.time_control]);
 
   /*
-   * Sayfa yeniden açıldığında REST API'den alınan
-   * mevcut clock snapshot'ını oluştur.
+   * Reconstruct the clock when the page is loaded from REST.
    *
-   * Henüz hamle yoksa saat çalışmaz.
-   *
-   * Hamle varsa son hamlenin oluşturulma zamanı,
-   * backend snapshot'ının zamanına yaklaşık referans olur.
+   * Before the first move, neither player has consumed any time.
+   * After moves exist, the most recent move timestamp acts as the
+   * local reference point for the current clock snapshot.
    */
   const baseClock = useMemo<ClockSnapshot>(() => {
     const lastMove = moves[moves.length - 1];
@@ -172,13 +215,15 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
   const effectiveClock = clockSnapshot ?? baseClock;
 
   /*
-   * Clock sadece oyun devam ederken çalışıyor.
-   *
-   * 250 ms'de bir UI güncelleniyor.
-   * Gerçek saat backend'de authoritative.
+   * Refresh the displayed clock only while the match is active.
+   * A 250 ms interval keeps the countdown visually smooth.
    */
   useEffect(() => {
-    if (match?.result !== "pending" || effectiveClock.lastMoveAt === null) {
+    if (
+      match?.result !== "pending" ||
+      gameFinished ||
+      effectiveClock.lastMoveAt === null
+    ) {
       return;
     }
 
@@ -189,10 +234,12 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [match?.result, effectiveClock.lastMoveAt]);
+  }, [match?.result, gameFinished, effectiveClock.lastMoveAt]);
 
   /*
-   * Backend'den game_move eventlerini dinle.
+   * Listen for authoritative game events from the WebSocket layer.
+   * Move events update the board and clock, while finish events
+   * freeze the game and preserve the final result data.
    */
   useEffect(() => {
     function handleMessage(message: unknown) {
@@ -205,12 +252,45 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
         return;
       }
 
-      const wsMessage = message as WebSocketGameMoveMessage;
+      if (message.type === "game_finished") {
+        const wsMessage = message as WebSocketGameFinishedMessage;
+        const payload = wsMessage.payload;
 
-      if (wsMessage.type !== "game_move") {
+        if (!payload || payload.match_id !== matchId) {
+          return;
+        }
+
+        setGameFinished(true);
+        setFinishResult(payload);
+        setClockNow(Date.now());
+
+        /*
+         * Synchronize the cached match with the authoritative
+         * result received from the WebSocket server.
+         */
+        queryClient.setQueryData<typeof match>(
+  ["match", matchId],
+  (currentMatch) => {
+    if (!currentMatch) {
+      return currentMatch;
+    }
+
+    return {
+      ...currentMatch,
+      result: payload.result,
+      white_rating: payload.white_rating_after,
+      black_rating: payload.black_rating_after,
+    };
+      });
+
         return;
       }
 
+      if (message.type !== "game_move") {
+        return;
+      }
+
+      const wsMessage = message as WebSocketGameMoveMessage;
       const payload = wsMessage.payload;
 
       if (!payload || payload.match_id !== matchId) {
@@ -221,7 +301,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
 
       if (!Number.isFinite(lastMoveAt)) {
         console.error(
-          "Invalid last_move_at received from server:",
+          "Received an invalid move timestamp:",
           payload.last_move_at,
         );
 
@@ -230,17 +310,18 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
 
       try {
         /*
-         * Backend'in gönderdiği FEN geçerli mi?
+         * Reject malformed board positions before touching the
+         * visible state.
          */
         new Chess(payload.fen_after);
 
         /*
-         * Backend authoritative position.
+         * Apply the server's canonical FEN to the local board.
          */
         setLivePosition(payload.fen_after);
 
         /*
-         * Backend authoritative clock.
+         * Replace the local clock anchor with the backend snapshot.
          */
         setClockSnapshot({
           whiteTimeMs: payload.white_time_ms,
@@ -249,26 +330,25 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
         });
 
         /*
-         * Event geldiği anda clockNow'u güncelle.
+         * Re-anchor the client-side visual countdown immediately.
          */
         setClockNow(Date.now());
       } catch (error) {
-        console.error("Failed to apply websocket chess move:", error);
+        console.error(
+          "Unable to apply the chess position received over WebSocket:",
+          error,
+        );
       }
     }
 
     const unsubscribe = websocketManager.subscribe(handleMessage);
 
     return unsubscribe;
-  }, [matchId]);
+  }, [matchId, queryClient]);
 
   /*
-   * Oyuncuların ekranda göreceği gerçek saatler.
-   *
-   * İlk hamleden önce elapsedMs = 0.
-   *
-   * Hamle yapıldıktan sonra sadece sıradaki oyuncunun
-   * zamanı azalır.
+   * The elapsed duration is used only to animate the active player's
+   * clock between authoritative backend updates.
    */
   const elapsedMs =
     effectiveClock.lastMoveAt === null
@@ -323,6 +403,56 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
 
   const opponentRating = isWhite ? match.black_rating : match.white_rating;
 
+  /*
+   * Final rating information comes from the game_finished event.
+   * Until the match finishes, the regular match rating is displayed.
+   */
+  const myRatingBefore = finishResult
+    ? isWhite
+      ? finishResult.white_rating_before
+      : finishResult.black_rating_before
+    : null;
+
+  const myRatingAfter = finishResult
+    ? isWhite
+      ? finishResult.white_rating_after
+      : finishResult.black_rating_after
+    : null;
+
+  const opponentRatingBefore = finishResult
+    ? isWhite
+      ? finishResult.black_rating_before
+      : finishResult.white_rating_before
+    : null;
+
+  const opponentRatingAfter = finishResult
+    ? isWhite
+      ? finishResult.black_rating_after
+      : finishResult.white_rating_after
+    : null;
+
+  const myRatingChange =
+    myRatingBefore !== null && myRatingAfter !== null
+      ? myRatingAfter - myRatingBefore
+      : null;
+
+  const opponentRatingChange =
+    opponentRatingBefore !== null && opponentRatingAfter !== null
+      ? opponentRatingAfter - opponentRatingBefore
+      : null;
+
+  const playerWon =
+    finishResult !== null &&
+    ((isWhite && finishResult.result === "white") ||
+      (!isWhite && finishResult.result === "black"));
+
+  const playerLost =
+    finishResult !== null &&
+    ((isWhite && finishResult.result === "black") ||
+      (!isWhite && finishResult.result === "white"));
+
+  const playerDrew = finishResult !== null && finishResult.result === "draw";
+
   function handlePieceDrop({
     sourceSquare,
     targetSquare,
@@ -332,14 +462,14 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     }
 
     /*
-     * Oyun bitmişse hamle gönderme.
+     * Do not allow moves after the server has ended the match.
      */
-    if (match?.result !== "pending") {
+    if (gameFinished || match?.result !== "pending") {
       return false;
     }
 
     /*
-     * Source square üzerinde gerçekten taş var mı?
+     * Confirm that the source square contains a real piece.
      */
     const piece = game.get(sourceSquare as Square);
 
@@ -348,16 +478,15 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     }
 
     /*
-     * Oyuncu sadece kendi taşını oynayabilir.
+     * The client blocks attempts to move an opponent's piece.
      */
     if (piece.color !== myColor) {
       return false;
     }
 
     /*
-     * Oyuncunun sırası değilse frontend'de engelle.
-     *
-     * Backend bunu ayrıca kontrol ediyor.
+     * This is only a UI-side guard.
+     * The backend performs the authoritative turn validation.
      */
     if (game.turn() !== myColor) {
       return false;
@@ -365,10 +494,9 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
 
     try {
       /*
-       * Gerçek game instance'ını değiştirmiyoruz.
-       *
-       * Sadece hamlenin legal olup olmadığını
-       * kontrol etmek için kopya kullanıyoruz.
+       * Validate the move using a temporary Chess.js instance.
+       * The visible board remains untouched until the server
+       * accepts and broadcasts the move.
        */
       const nextGame = new Chess(game.fen());
 
@@ -385,13 +513,10 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
       const uci = `${sourceSquare}${targetSquare}` + `${move.promotion ?? ""}`;
 
       /*
-       * Hamleyi backend'e gönder.
+       * Send the candidate move to the backend.
        *
-       * Board henüz local olarak değiştirilmez.
-       *
-       * Backend kabul ederse game_move eventini
-       * bize gönderir ve FEN authoritative olarak
-       * uygulanır.
+       * No local board mutation occurs here. The authoritative
+       * game_move event is responsible for changing the position.
        */
       websocketManager.send("game_move", {
         match_id: matchId,
@@ -403,7 +528,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
 
       return true;
     } catch (error) {
-      console.error("Failed to make chess move:", error);
+      console.error("Failed to create chess move:", error);
 
       return false;
     }
@@ -413,9 +538,9 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     <div className="min-h-[calc(100vh-4rem)] bg-zinc-950 p-6 text-white">
       <div className="mx-auto flex h-full w-full max-w-6xl items-center justify-center">
         <div className="grid w-full grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-          {/* Chess section */}
+          {/* Main chess area */}
           <section className="flex min-w-0 flex-col items-center">
-            {/* Opponent */}
+            {/* Opponent information and clock */}
             <div className="mb-3 flex w-full max-w-130 items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-800 text-sm font-bold">
@@ -425,7 +550,9 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                 <div>
                   <p className="text-sm font-semibold">{opponentUsername}</p>
 
-                  <p className="text-xs text-zinc-500">{opponentRating}</p>
+                  <p className="text-xs text-zinc-500">
+                    {finishResult ? opponentRatingAfter : opponentRating}
+                  </p>
                 </div>
               </div>
 
@@ -436,19 +563,19 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
               </div>
             </div>
 
-            {/* Board */}
+            {/* Chess board */}
             <div className="w-full max-w-130 overflow-hidden rounded-lg shadow-2xl">
               <Chessboard
                 options={{
                   position,
                   boardOrientation: isWhite ? "white" : "black",
-                  allowDragging: true,
+                  allowDragging: !gameFinished && match.result === "pending",
                   onPieceDrop: handlePieceDrop,
                 }}
               />
             </div>
 
-            {/* Player */}
+            {/* Current player information and clock */}
             <div className="mt-3 flex w-full max-w-130 items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100 text-sm font-bold text-black">
@@ -458,7 +585,9 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                 <div>
                   <p className="text-sm font-semibold">{myUsername}</p>
 
-                  <p className="text-xs text-zinc-500">{myRating}</p>
+                  <p className="text-xs text-zinc-500">
+                    {finishResult ? myRatingAfter : myRating}
+                  </p>
                 </div>
               </div>
 
@@ -474,9 +603,9 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
             </p>
           </section>
 
-          {/* Side panel */}
+          {/* Game information sidebar */}
           <aside className="flex h-130 flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900">
-            {/* Header */}
+            {/* Match header */}
             <div className="border-b border-zinc-800 px-5 py-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -488,12 +617,16 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                 </div>
 
                 <span className="rounded-md bg-zinc-800 px-2 py-1 text-xs text-zinc-400">
-                  {match.result === "pending" ? "Ongoing" : match.result}
+                  {gameFinished
+                    ? "Finished"
+                    : match.result === "pending"
+                      ? "Ongoing"
+                      : match.result}
                 </span>
               </div>
             </div>
 
-            {/* Moves */}
+            {/* Move history */}
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
               {isMovesLoading ? (
                 <div className="flex h-full items-center justify-center">
@@ -505,7 +638,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                 </div>
               ) : (
                 <div className="overflow-hidden rounded-lg border border-zinc-800">
-                  {/* Header */}
+                  {/* Move table heading */}
                   <div className="grid grid-cols-[36px_1fr_1fr] bg-zinc-950 text-xs text-zinc-500">
                     <div className="px-3 py-2">#</div>
 
@@ -514,7 +647,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                     <div className="px-3 py-2">Black</div>
                   </div>
 
-                  {/* Moves */}
+                  {/* Pair white and black moves by move number */}
                   {Array.from(
                     {
                       length: Math.ceil(moves.length / 2),
@@ -558,24 +691,91 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
               )}
             </div>
 
-            {/* Controls */}
-            <div className="border-t border-zinc-800 p-4">
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  className="rounded-lg border border-zinc-700 px-4 py-2.5 text-sm font-medium text-zinc-300 transition hover:bg-zinc-800"
-                >
-                  Draw
-                </button>
+            {/* Final result */}
+            {gameFinished && finishResult && (
+              <div className="border-t border-zinc-800 px-5 py-4">
+                <div className="mb-4">
+                  <p className="text-sm font-semibold">
+                    {playerWon
+                      ? "You won"
+                      : playerLost
+                        ? "You lost"
+                        : playerDrew
+                          ? "Draw"
+                          : "Game finished"}
+                  </p>
 
-                <button
-                  type="button"
-                  className="rounded-lg bg-red-500/10 px-4 py-2.5 text-sm font-medium text-red-400 transition hover:bg-red-500/20"
-                >
-                  Resign
-                </button>
+                  <p className="mt-1 text-xs capitalize text-zinc-500">
+                    {finishResult.reason}
+                  </p>
+                </div>
+
+                <div className="space-y-3 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-zinc-500">Your rating</span>
+
+                    <span className="font-semibold">
+                      {myRatingAfter}
+
+                      {myRatingChange !== null && (
+                        <span
+                          className={
+                            myRatingChange >= 0
+                              ? "ml-2 text-green-400"
+                              : "ml-2 text-red-400"
+                          }
+                        >
+                          {myRatingChange >= 0 ? "+" : ""}
+                          {myRatingChange}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-zinc-500">Opponent rating</span>
+
+                    <span className="font-semibold">
+                      {opponentRatingAfter}
+
+                      {opponentRatingChange !== null && (
+                        <span
+                          className={
+                            opponentRatingChange >= 0
+                              ? "ml-2 text-green-400"
+                              : "ml-2 text-red-400"
+                          }
+                        >
+                          {opponentRatingChange >= 0 ? "+" : ""}
+                          {opponentRatingChange}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* Match controls */}
+            {!gameFinished && (
+              <div className="border-t border-zinc-800 p-4">
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    className="rounded-lg border border-zinc-700 px-4 py-2.5 text-sm font-medium text-zinc-300 transition hover:bg-zinc-800"
+                  >
+                    Draw
+                  </button>
+
+                  <button
+                    type="button"
+                    className="rounded-lg bg-red-500/10 px-4 py-2.5 text-sm font-medium text-red-400 transition hover:bg-red-500/20"
+                  >
+                    Resign
+                  </button>
+                </div>
+              </div>
+            )}
           </aside>
         </div>
       </div>
