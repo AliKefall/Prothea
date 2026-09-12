@@ -215,3 +215,115 @@ func (s *Service) HandleMove(
 
 	return nil
 }
+
+type ResignEventPayload struct {
+	MatchID uuid.UUID `json:"match_id"`
+}
+
+func (s *Service) HandlerResign(
+	ctx context.Context,
+	client *websocket.Client,
+	event websocket.Event,
+) error {
+	if client == nil {
+		return errors.New("websocket client is nil")
+	}
+
+	if client.UserID == "" {
+		return errors.New("websocket user id is empty")
+	}
+
+	var payload ResignEventPayload
+
+	if err := json.Unmarshal(
+		event.Payload,
+		&payload,
+	); err != nil {
+		return err
+	}
+
+	if payload.MatchID == uuid.Nil {
+		return errors.New("match id is required")
+	}
+
+	playerID, err := uuid.Parse(client.UserID)
+	if err != nil {
+		return errors.New("invalid websocket user id")
+	}
+
+	slog.Info(
+		"game resignation received",
+		"match_id", payload.MatchID,
+		"player_id", playerID,
+	)
+
+	finish, err := s.Resign(
+		ctx,
+		payload.MatchID,
+		playerID,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	if client.Hub == nil {
+		return errors.New("websocket hub is nil")
+	}
+
+	finishedPayload := GameFinishedEvent{
+		MatchID: payload.MatchID.String(),
+
+		Result:   string(finish.Result),
+		WinnerID: finish.WinnerID.String(),
+		LoserID:  finish.LoserID.String(),
+
+		Reason: finish.Reason,
+
+		WhiteRatingBefore: finish.WhiteRatingBefore,
+		WhiteRatingAfter:  finish.WhiteRatingAfter,
+
+		BlackRatingBefore: finish.BlackRatingBefore,
+		BlackRatingAfter:  finish.BlackRatingAfter,
+
+		CreatedAt: time.Now().UTC().Format(
+			time.RFC3339Nano,
+		),
+	}
+
+	finishedEvent, err := websocket.NewEvent(
+		websocket.EventGameFinished,
+		finishedPayload,
+	)
+	if err != nil {
+		return err
+	}
+
+	if err := client.Hub.SendToUser(
+		finish.WinnerID.String(),
+		finishedEvent,
+	); err != nil {
+		return err
+	}
+
+	if err := client.Hub.SendToUser(
+		finish.LoserID.String(),
+		finishedEvent,
+	); err != nil {
+		return err
+	}
+
+	slog.Info(
+		"game resigned",
+		"match_id", payload.MatchID,
+		"player_id", playerID,
+		"winner_id", finish.WinnerID,
+		"loser_id", finish.LoserID,
+		"white_rating_before", finish.WhiteRatingBefore,
+		"white_rating_after", finish.WhiteRatingAfter,
+		"black_rating_before", finish.BlackRatingBefore,
+		"black_rating_after", finish.BlackRatingAfter,
+	)
+
+	return nil
+}

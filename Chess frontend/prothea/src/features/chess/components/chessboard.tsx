@@ -9,7 +9,8 @@ import { websocketManager } from "@/lib/websocket";
 
 import { useMatch } from "../hooks/use-match";
 import { useMatchMoves } from "../hooks/use-match-moves";
-import { QueryClient, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
+import { GameResult } from "./game-result";
 
 const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -269,19 +270,20 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
          * result received from the WebSocket server.
          */
         queryClient.setQueryData<typeof match>(
-  ["match", matchId],
-  (currentMatch) => {
-    if (!currentMatch) {
-      return currentMatch;
-    }
+          ["match", matchId],
+          (currentMatch) => {
+            if (!currentMatch) {
+              return currentMatch;
+            }
 
-    return {
-      ...currentMatch,
-      result: payload.result,
-      white_rating: payload.white_rating_after,
-      black_rating: payload.black_rating_after,
-    };
-      });
+            return {
+              ...currentMatch,
+              result: payload.result,
+              white_rating: payload.white_rating_after,
+              black_rating: payload.black_rating_after,
+            };
+          },
+        );
 
         return;
       }
@@ -403,56 +405,6 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
 
   const opponentRating = isWhite ? match.black_rating : match.white_rating;
 
-  /*
-   * Final rating information comes from the game_finished event.
-   * Until the match finishes, the regular match rating is displayed.
-   */
-  const myRatingBefore = finishResult
-    ? isWhite
-      ? finishResult.white_rating_before
-      : finishResult.black_rating_before
-    : null;
-
-  const myRatingAfter = finishResult
-    ? isWhite
-      ? finishResult.white_rating_after
-      : finishResult.black_rating_after
-    : null;
-
-  const opponentRatingBefore = finishResult
-    ? isWhite
-      ? finishResult.black_rating_before
-      : finishResult.white_rating_before
-    : null;
-
-  const opponentRatingAfter = finishResult
-    ? isWhite
-      ? finishResult.black_rating_after
-      : finishResult.white_rating_after
-    : null;
-
-  const myRatingChange =
-    myRatingBefore !== null && myRatingAfter !== null
-      ? myRatingAfter - myRatingBefore
-      : null;
-
-  const opponentRatingChange =
-    opponentRatingBefore !== null && opponentRatingAfter !== null
-      ? opponentRatingAfter - opponentRatingBefore
-      : null;
-
-  const playerWon =
-    finishResult !== null &&
-    ((isWhite && finishResult.result === "white") ||
-      (!isWhite && finishResult.result === "black"));
-
-  const playerLost =
-    finishResult !== null &&
-    ((isWhite && finishResult.result === "black") ||
-      (!isWhite && finishResult.result === "white"));
-
-  const playerDrew = finishResult !== null && finishResult.result === "draw";
-
   function handlePieceDrop({
     sourceSquare,
     targetSquare,
@@ -551,7 +503,11 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                   <p className="text-sm font-semibold">{opponentUsername}</p>
 
                   <p className="text-xs text-zinc-500">
-                    {finishResult ? opponentRatingAfter : opponentRating}
+                    {finishResult
+                      ? isWhite
+                        ? finishResult.black_rating_after
+                        : finishResult.white_rating_after
+                      : opponentRating}
                   </p>
                 </div>
               </div>
@@ -586,7 +542,11 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                   <p className="text-sm font-semibold">{myUsername}</p>
 
                   <p className="text-xs text-zinc-500">
-                    {finishResult ? myRatingAfter : myRating}
+                    {finishResult
+                      ? isWhite
+                        ? finishResult.white_rating_after
+                        : finishResult.black_rating_after
+                      : myRating}
                   </p>
                 </div>
               </div>
@@ -691,71 +651,17 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
               )}
             </div>
 
-            {/* Final result */}
             {gameFinished && finishResult && (
-              <div className="border-t border-zinc-800 px-5 py-4">
-                <div className="mb-4">
-                  <p className="text-sm font-semibold">
-                    {playerWon
-                      ? "You won"
-                      : playerLost
-                        ? "You lost"
-                        : playerDrew
-                          ? "Draw"
-                          : "Game finished"}
-                  </p>
-
-                  <p className="mt-1 text-xs capitalize text-zinc-500">
-                    {finishResult.reason}
-                  </p>
-                </div>
-
-                <div className="space-y-3 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-500">Your rating</span>
-
-                    <span className="font-semibold">
-                      {myRatingAfter}
-
-                      {myRatingChange !== null && (
-                        <span
-                          className={
-                            myRatingChange >= 0
-                              ? "ml-2 text-green-400"
-                              : "ml-2 text-red-400"
-                          }
-                        >
-                          {myRatingChange >= 0 ? "+" : ""}
-                          {myRatingChange}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-500">Opponent rating</span>
-
-                    <span className="font-semibold">
-                      {opponentRatingAfter}
-
-                      {opponentRatingChange !== null && (
-                        <span
-                          className={
-                            opponentRatingChange >= 0
-                              ? "ml-2 text-green-400"
-                              : "ml-2 text-red-400"
-                          }
-                        >
-                          {opponentRatingChange >= 0 ? "+" : ""}
-                          {opponentRatingChange}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                </div>
-              </div>
+              <GameResult
+                result={finishResult.result}
+                reason={finishResult.reason}
+                isWhite={isWhite}
+                whiteRatingBefore={finishResult.white_rating_before}
+                whiteRatingAfter={finishResult.white_rating_after}
+                blackRatingBefore={finishResult.black_rating_before}
+                blackRatingAfter={finishResult.black_rating_after}
+              />
             )}
-
             {/* Match controls */}
             {!gameFinished && (
               <div className="border-t border-zinc-800 p-4">
@@ -768,11 +674,17 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                   </button>
 
                   <button
-                    type="button"
-                    className="rounded-lg bg-red-500/10 px-4 py-2.5 text-sm font-medium text-red-400 transition hover:bg-red-500/20"
-                  >
-                    Resign
-                  </button>
+  type="button"
+  disabled={gameFinished || match.result !== "pending"}
+  onClick={() => {
+    websocketManager.send("game_resign", {
+      match_id: matchId,
+    });
+  }}
+  className="rounded-lg bg-red-500/10 px-4 py-2.5 text-sm font-medium text-red-400 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+>
+  Resign
+</button>
                 </div>
               </div>
             )}

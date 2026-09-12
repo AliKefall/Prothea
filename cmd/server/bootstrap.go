@@ -64,6 +64,11 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 		gameService.HandleMove,
 	)
 
+	hub.Register(
+		websocket.EventGameResign,
+		gameService.HandlerResign,
+	)
+
 	deps := &endpoints.Deps{
 		DB:          conn,
 		Queries:     queries,

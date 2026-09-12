@@ -9,10 +9,14 @@ import (
 )
 
 var (
-	ErrGameStateNotFound = errors.New("game state not found")
-	ErrInvalidTurn       = errors.New("invalid turn")
-	ErrInvalidGameTime   = errors.New("invalid game time")
-	ErrGameTimeExpired   = errors.New("game time expired")
+	ErrGameStateNotFound   = errors.New("game state not found")
+	ErrInvalidTurn         = errors.New("invalid turn")
+	ErrInvalidGameTime     = errors.New("invalid game time")
+	ErrGameTimeExpired     = errors.New("game time expired")
+	ErrDrawOfferPending    = errors.New("draw offer already pending")
+	ErrDrawOfferNotPending = errors.New("draw offer is not pending")
+	ErrNotDrawOfferOwner   = errors.New("player does not own the draw offer")
+	ErrDrawOfferOwner      = errors.New("player has already offered draw")
 )
 
 type Color string
@@ -46,6 +50,11 @@ type State struct {
 	IncrementMs int64
 
 	LastMoveAt time.Time
+
+	// This could be a bit confusing, simply what this does is
+	// identifies the player who currently has a pending draw offer
+	// A nil value means there is no active draw offer.
+	DrawOfferBy *uuid.UUID
 
 	mu sync.RWMutex
 }
@@ -157,3 +166,95 @@ func (s *State) Abandon() {
 
 	s.Status = StateAbandoned
 }
+
+func (s *State) OfferDraw(playerID uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.Status != StateActive {
+		return ErrGameNotActive
+	}
+
+	if playerID != s.WhiteID &&
+		playerID != s.BlackID {
+		return ErrPlayerNotInMatch
+	}
+
+	if s.DrawOfferBy != nil {
+		return ErrDrawOfferPending
+	}
+
+	player := playerID
+	s.DrawOfferBy = &player
+
+	return nil
+}
+
+func (s *State) CancelDrawOffer(playerID uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.DrawOfferBy == nil {
+		return ErrDrawOfferPending
+	}
+
+	if *s.DrawOfferBy != playerID {
+		return ErrNotDrawOfferOwner
+	}
+
+	s.DrawOfferBy = nil
+	return nil
+}
+
+func (s *State) AcceptDraw(playerID uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.Status != StateActive {
+		return ErrGameNotActive
+	}
+
+	if s.DrawOfferBy == nil {
+		return ErrDrawOfferNotPending
+	}
+
+	if *s.DrawOfferBy == playerID {
+		return ErrDrawOfferOwner
+	}
+
+	if playerID != s.WhiteID &&
+		playerID != s.BlackID {
+		return ErrPlayerNotInMatch
+	}
+
+	return nil
+}
+
+// This is for if the player decided to take back his draw offer
+func (s *State) DeclineDraw(playerID uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.Status != StateActive {
+		return ErrGameNotActive
+	}
+
+	if s.DrawOfferBy == nil {
+		return ErrDrawOfferNotPending
+	}
+
+	// The player declining the offer must be the opponent.
+	if *s.DrawOfferBy == playerID {
+		return ErrDrawOfferOwner
+	}
+
+	if playerID != s.WhiteID &&
+		playerID != s.BlackID {
+		return ErrPlayerNotInMatch
+	}
+
+	s.DrawOfferBy = nil
+
+	return nil
+}
+

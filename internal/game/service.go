@@ -399,128 +399,128 @@ func (s *Service) ApplyMove(
 	); err != nil {
 		// The player ran out of time before completing the move.
 		if errors.Is(err, ErrGameTimeExpired) {
-	var result database.MatchResult
-	var winnerID uuid.UUID
-	var loserID uuid.UUID
+			var result database.MatchResult
+			var winnerID uuid.UUID
+			var loserID uuid.UUID
 
-	// The player whose clock expired loses the game.
-	switch input.PlayerID {
-	case state.WhiteID:
-		result = database.MatchResultBlack
-		winnerID = state.BlackID
-		loserID = state.WhiteID
+			// The player whose clock expired loses the game.
+			switch input.PlayerID {
+			case state.WhiteID:
+				result = database.MatchResultBlack
+				winnerID = state.BlackID
+				loserID = state.WhiteID
 
-	case state.BlackID:
-		result = database.MatchResultWhite
-		winnerID = state.WhiteID
-		loserID = state.BlackID
+			case state.BlackID:
+				result = database.MatchResultWhite
+				winnerID = state.WhiteID
+				loserID = state.BlackID
 
-	default:
-		return MoveResult{}, ErrPlayerNotInMatch
-	}
+			default:
+				return MoveResult{}, ErrPlayerNotInMatch
+			}
 
-	// We need the match's time control to determine
-	// whether this is a bullet, blitz, or rapid rating.
-	match, err := s.GetMatch(
-		ctx,
-		input.MatchID,
-	)
-	if err != nil {
-		return MoveResult{}, err
-	}
+			// We need the match's time control to determine
+			// whether this is a bullet, blitz, or rapid rating.
+			match, err := s.GetMatch(
+				ctx,
+				input.MatchID,
+			)
+			if err != nil {
+				return MoveResult{}, err
+			}
 
-	ratingType, err := elo.RatingTypeFromTimeControl(
-		match.TimeControl,
-	)
-	if err != nil {
-		return MoveResult{}, err
-	}
+			ratingType, err := elo.RatingTypeFromTimeControl(
+				match.TimeControl,
+			)
+			if err != nil {
+				return MoveResult{}, err
+			}
 
-	var eloResult elo.Result
+			var eloResult elo.Result
 
-	switch result {
-	case database.MatchResultWhite:
-		eloResult = elo.ResultWhiteWin
+			switch result {
+			case database.MatchResultWhite:
+				eloResult = elo.ResultWhiteWin
 
-	case database.MatchResultBlack:
-		eloResult = elo.ResultBlackWin
+			case database.MatchResultBlack:
+				eloResult = elo.ResultBlackWin
 
-	default:
-		return MoveResult{}, errors.New(
-			"invalid timeout match result",
-		)
-	}
+			default:
+				return MoveResult{}, errors.New(
+					"invalid timeout match result",
+				)
+			}
 
-	// Calculate and persist the new ratings.
-	ratings, err := s.EloService.UpdateMatch(
-		ctx,
-		input.MatchID,
-		state.WhiteID,
-		state.BlackID,
-		ratingType,
-		eloResult,
-	)
-	if err != nil {
-		return MoveResult{}, err
-	}
+			// Calculate and persist the new ratings.
+			ratings, err := s.EloService.UpdateMatch(
+				ctx,
+				input.MatchID,
+				state.WhiteID,
+				state.BlackID,
+				ratingType,
+				eloResult,
+			)
+			if err != nil {
+				return MoveResult{}, err
+			}
 
-	whiteRatingBefore := int(
-		math.Round(ratings.WhiteBefore.Value),
-	)
+			whiteRatingBefore := int(
+				math.Round(ratings.WhiteBefore.Value),
+			)
 
-	whiteRatingAfter := int(
-		math.Round(ratings.WhiteAfter.Value),
-	)
+			whiteRatingAfter := int(
+				math.Round(ratings.WhiteAfter.Value),
+			)
 
-	blackRatingBefore := int(
-		math.Round(ratings.BlackBefore.Value),
-	)
+			blackRatingBefore := int(
+				math.Round(ratings.BlackBefore.Value),
+			)
 
-	blackRatingAfter := int(
-		math.Round(ratings.BlackAfter.Value),
-	)
+			blackRatingAfter := int(
+				math.Round(ratings.BlackAfter.Value),
+			)
 
-	// Mark the match as finished and store the new ratings.
-	if _, err := s.FinishMatch(
-		ctx,
-		input.MatchID,
-		result,
-		&whiteRatingAfter,
-		&blackRatingAfter,
-	); err != nil {
-		return MoveResult{}, err
-	}
+			// Mark the match as finished and store the new ratings.
+			if _, err := s.FinishMatch(
+				ctx,
+				input.MatchID,
+				result,
+				&whiteRatingAfter,
+				&blackRatingAfter,
+			); err != nil {
+				return MoveResult{}, err
+			}
 
-	// Persist the finished state to Redis.
-	if err := s.StateStore.Set(
-		ctx,
-		state,
-	); err != nil {
-		return MoveResult{}, err
-	}
+			// Persist the finished state to Redis.
+			if err := s.StateStore.Set(
+				ctx,
+				state,
+			); err != nil {
+				return MoveResult{}, err
+			}
 
-	return MoveResult{
-		MatchID: input.MatchID,
+			return MoveResult{
+				MatchID: input.MatchID,
 
-		WhiteID: state.WhiteID,
-		BlackID: state.BlackID,
+				WhiteID: state.WhiteID,
+				BlackID: state.BlackID,
 
-		Finish: &FinishResult{
-			Result: result,
+				Finish: &FinishResult{
+					Result: result,
 
-			WinnerID: winnerID,
-			LoserID:  loserID,
+					WinnerID: winnerID,
+					LoserID:  loserID,
 
-			Reason: "timeout",
+					Reason: "timeout",
 
-			WhiteRatingBefore: whiteRatingBefore,
-			WhiteRatingAfter:  whiteRatingAfter,
+					WhiteRatingBefore: whiteRatingBefore,
+					WhiteRatingAfter:  whiteRatingAfter,
 
-			BlackRatingBefore: blackRatingBefore,
-			BlackRatingAfter:  blackRatingAfter,
-		},
-	}, nil
-}
+					BlackRatingBefore: blackRatingBefore,
+					BlackRatingAfter:  blackRatingAfter,
+				},
+			}, nil
+		}
 	}
 
 	// Get the latest move number so the new move can be stored
@@ -602,6 +602,10 @@ func (s *Service) FinishGame(
 
 	if state == nil {
 		return FinishResult{}, ErrGameStateNotFound
+	}
+
+	if !state.IsActive() {
+		return FinishResult{}, ErrGameNotActive
 	}
 
 	if s.EloService == nil {
@@ -723,6 +727,228 @@ func (s *Service) FinishGame(
 		BlackRatingBefore: blackRatingBefore,
 		BlackRatingAfter:  blackRatingAfter,
 	}, nil
+}
+
+func (s *Service) Resign(
+	ctx context.Context,
+	matchID uuid.UUID,
+	playerID uuid.UUID,
+) (FinishResult, error) {
+	if s == nil {
+		return FinishResult{}, errors.New(
+			"game service is null",
+		)
+	}
+
+	if s.GameLock == nil {
+		return FinishResult{}, errors.New(
+			"game lock is not initialized",
+		)
+	}
+
+	if s.StateStore == nil {
+		return FinishResult{}, errors.New(
+			"game state store is not initialized",
+		)
+	}
+
+	release, err := s.GameLock.Acquire(
+		ctx,
+		matchID,
+	)
+
+	if err != nil {
+		return FinishResult{}, err
+	}
+	defer release()
+
+	state, err := s.StateStore.Get(
+		ctx,
+		matchID,
+	)
+	if err != nil {
+		return FinishResult{}, err
+	}
+
+	if !state.IsActive() {
+		return FinishResult{}, ErrGameNotActive
+	}
+
+	if state.WhiteID != playerID &&
+		state.BlackID != playerID {
+		return FinishResult{}, ErrPlayerNotInMatch
+	}
+
+	var result database.MatchResult
+
+	switch playerID {
+	case state.WhiteID:
+		result = database.MatchResultBlack
+
+	case state.BlackID:
+		result = database.MatchResultWhite
+
+	default:
+		return FinishResult{}, ErrPlayerNotInMatch
+	}
+
+	return s.FinishGame(
+		ctx,
+		state,
+		result,
+		"resignation",
+	)
+
+}
+
+func (s *Service) OfferDraw(
+	ctx context.Context,
+	matchID uuid.UUID,
+	playerID uuid.UUID,
+) error {
+	if s == nil {
+		return errors.New("game service is nil")
+	}
+
+	if s.GameLock == nil {
+		return errors.New("game lock is not initialized")
+	}
+
+	if s.StateStore == nil {
+		return errors.New("game state store is not initialized")
+	}
+
+	release, err := s.GameLock.Acquire(
+		ctx,
+		matchID,
+	)
+	if err != nil {
+		return err
+	}
+
+	defer release()
+
+	state, err := s.StateStore.Get(
+		ctx,
+		matchID,
+	)
+	if err != nil {
+		return err
+	}
+
+	if !state.IsActive() {
+		return ErrGameNotActive
+	}
+
+	if err := state.OfferDraw(playerID); err != nil {
+		return err
+	}
+
+	return s.StateStore.Set(
+		ctx,
+		state,
+	)
+}
+
+func (s *Service) AccepDraw(
+	ctx context.Context,
+	matchID uuid.UUID,
+	playerID uuid.UUID,
+) (FinishResult, error) {
+	if s == nil {
+		return FinishResult{}, errors.New("game service is nil")
+	}
+	if s.GameLock == nil {
+		return FinishResult{}, errors.New(
+			"game lock is not initialized",
+		)
+	}
+
+	if s.StateStore == nil {
+		return FinishResult{}, errors.New(
+			"game state store is not initialized",
+		)
+	}
+
+	release, err := s.GameLock.Acquire(
+		ctx,
+		matchID,
+	)
+	if err != nil {
+		return FinishResult{}, err
+	}
+	defer release()
+
+	state, err := s.StateStore.Get(
+		ctx,
+		matchID,
+	)
+
+	if err != nil {
+		return FinishResult{}, err
+	}
+	if !state.IsActive() {
+		return FinishResult{}, ErrGameNotActive
+	}
+
+	if err := state.AcceptDraw(playerID); err != nil {
+		return FinishResult{}, err
+	}
+
+	return s.FinishGame(
+		ctx,
+		state,
+		database.MatchResultDraw,
+		"agreement",
+	)
+}
+
+func (s *Service) RejectDraw(
+	ctx context.Context,
+	matchID uuid.UUID,
+	playerID uuid.UUID,
+) error {
+	if s == nil {
+		return errors.New("game service is nil")
+	}
+
+	if s.GameLock == nil {
+		return errors.New("game lock is not initialized")
+	}
+
+	if s.StateStore == nil {
+		return errors.New("game state store is not initialized")
+	}
+
+	release, err := s.GameLock.Acquire(
+		ctx,
+		matchID,
+	)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	state, err := s.StateStore.Get(
+		ctx,
+		matchID,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	if !state.IsActive(){
+		return ErrGameNotActive
+	}
+
+	if err := state.CancelDrawOffer(playerID); err != nil {
+		return err
+	}
+	return s.StateStore.Set(
+		ctx,
+		state,
+	)
 }
 
 // parseTimeControl converts a chess time control such as "10+5"
