@@ -327,3 +327,251 @@ func (s *Service) HandlerResign(
 
 	return nil
 }
+
+type DrawEventPayload struct {
+	MatchID uuid.UUID `json:"match_id"`
+}
+
+func (s *Service) HandleDrawOffer(
+	ctx context.Context,
+	client *websocket.Client,
+	event websocket.Event,
+) error {
+
+	var payload DrawEventPayload
+
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return err
+	}
+
+	if payload.MatchID == uuid.Nil {
+		return errors.New("match id is required")
+	}
+
+	playerID, err := uuid.Parse(client.UserID)
+	if err != nil {
+		return errors.New("invalid websocket user id")
+	}
+
+	if err := s.OfferDraw(
+		ctx,
+		payload.MatchID,
+		playerID,
+	); err != nil {
+		return err
+	}
+
+	state, err := s.StateStore.Get(
+		ctx,
+		payload.MatchID,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	// Notify only the opponent
+
+	var opponentID uuid.UUID
+
+	switch playerID {
+	case state.WhiteID:
+		opponentID = state.BlackID
+	case state.BlackID:
+		opponentID = state.WhiteID
+	default:
+		return ErrPlayerNotInMatch
+	}
+
+	offerEvent, err := websocket.NewEvent(
+		websocket.EventGameDrawOffer,
+		payload,
+	)
+	if err != nil {
+		return err
+	}
+
+	return client.Hub.SendToUser(
+		opponentID.String(),
+		offerEvent,
+	)
+
+}
+
+func (s *Service) HandleDrawAccept(
+	ctx context.Context,
+	client *websocket.Client,
+	event websocket.Event,
+) error {
+	if client == nil {
+		return errors.New("websocket client is nil")
+	}
+
+	if client.UserID == "" {
+		return errors.New("websocket user id is empty")
+	}
+
+	var payload DrawEventPayload
+
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return err
+	}
+
+	if payload.MatchID == uuid.Nil {
+		return errors.New("match id is required")
+	}
+
+	playerID, err := uuid.Parse(client.UserID)
+	if err != nil {
+		return errors.New("invalid websocket user id")
+	}
+
+	if client.Hub == nil {
+		return errors.New("websocket hub is nil")
+	}
+
+	finish, err := s.AcceptDraw(
+		ctx,
+		payload.MatchID,
+		playerID,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	finishPayload := GameFinishedEvent{
+		MatchID: payload.MatchID.String(),
+
+		Result:   string(finish.Result),
+		WinnerID: finish.WinnerID.String(),
+		LoserID:  finish.LoserID.String(),
+
+		Reason: finish.Reason,
+
+		WhiteRatingBefore: finish.WhiteRatingBefore,
+		WhiteRatingAfter:  finish.WhiteRatingAfter,
+
+		BlackRatingBefore: finish.BlackRatingBefore,
+		BlackRatingAfter:  finish.BlackRatingAfter,
+
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+
+	finishedEvent, err := websocket.NewEvent(
+		websocket.EventGameFinished,
+		finishPayload,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	state, err := s.StateStore.Get(
+		ctx,
+		payload.MatchID,
+	)
+	if err != nil {
+		return err
+	}
+
+	if err := client.Hub.SendToUser(
+		state.WhiteID.String(),
+		finishedEvent,
+	); err != nil {
+		return err
+	}
+
+	if err := client.Hub.SendToUser(
+		state.BlackID.String(),
+		finishedEvent,
+	); err != nil {
+		return err
+	}
+
+	slog.Info(
+		"draw accepted",
+		"match_id", payload.MatchID,
+		"player_id", playerID,
+	)
+
+	return nil
+}
+
+func (s *Service) HandleDrawDecline(
+	ctx context.Context,
+	client *websocket.Client,
+	event websocket.Event,
+) error {
+	if client == nil {
+		return errors.New("websocket client is nil")
+	}
+
+	if client.UserID == "" {
+		return errors.New("websocket user id is empty")
+	}
+
+	var payload DrawEventPayload
+
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return err
+	}
+
+	if payload.MatchID == uuid.Nil {
+		return errors.New("match id is required")
+	}
+
+	playerID, err := uuid.Parse(client.UserID)
+	if err != nil {
+		return errors.New("invalid websocket user id")
+	}
+
+	if client.Hub == nil {
+		return errors.New("websocket hub is nil")
+	}
+
+	if err := s.RejectDraw(
+		ctx,
+		payload.MatchID,
+		playerID,
+	); err != nil {
+		return err
+	}
+
+	state, err := s.StateStore.Get(
+		ctx,
+		payload.MatchID,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	var opponentID uuid.UUID
+
+	switch playerID{
+	case state.WhiteID:
+		opponentID = state.BlackID
+	case state.BlackID:
+		opponentID = state.WhiteID
+
+	default:
+		return ErrPlayerNotInMatch
+	}
+
+	declineEvent, err := websocket.NewEvent(
+		websocket.EventGameDrawReject,
+		payload,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	return client.Hub.SendToUser(
+		opponentID.String(),
+		declineEvent,
+	)
+
+
+}

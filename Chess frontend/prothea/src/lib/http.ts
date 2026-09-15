@@ -1,5 +1,8 @@
-import { useAuthStore } from "@/features/auth/auth-store";
+"use client";
+
 import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
+
+import { useAuthStore } from "@/features/auth/auth-store";
 
 type ApiErrorBody = {
   error?: {
@@ -43,14 +46,19 @@ export const http = axios.create({
 });
 
 /*
- * Refresh request must use a separate axios instance.
- * Otherwise a failed refresh could trigger another refresh.
+ * The refresh endpoint uses an isolated Axios client.
+ * This prevents a failed refresh request from entering
+ * the normal authentication interceptor again.
  */
 const refreshClient = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
 });
 
+
+/* Alos if refresh endpoints throws another race condition
+ * Change the backend for another algorithm
+ */
 http.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const token = useAuthStore.getState().accessToken;
 
@@ -69,7 +77,10 @@ function processQueue(error: unknown, token?: string) {
   for (const request of failedQueue) {
     if (error) {
       request.reject(error);
-    } else if (token) {
+      continue;
+    }
+
+    if (token) {
       request.resolve(token);
     }
   }
@@ -77,7 +88,7 @@ function processQueue(error: unknown, token?: string) {
   failedQueue = [];
 }
 
-function isAuthEndpoint(url?: string) {
+function isAuthEndpoint(url?: string): boolean {
   if (!url) {
     return false;
   }
@@ -108,8 +119,8 @@ http.interceptors.response.use(
     const status = error.response?.status;
 
     /*
-     * Authentication endpoints should not trigger
-     * the refresh flow.
+     * Only regular authenticated requests are allowed
+     * to enter the refresh flow.
      */
     const shouldRefresh =
       status === 401 &&
@@ -130,8 +141,8 @@ http.interceptors.response.use(
     }
 
     /*
-     * Another request is already refreshing the token.
-     * Queue this request until the refresh completes.
+     * If another request already owns the refresh operation,
+     * wait for that operation instead of creating another one.
      */
     if (isRefreshing) {
       return new Promise((resolve, reject) => {
@@ -165,6 +176,10 @@ http.interceptors.response.use(
 
       useAuthStore.getState().setSession(newAccessToken, currentUser);
 
+      /*
+       * Release all requests that were waiting for
+       * the refreshed access token.
+       */
       processQueue(null, newAccessToken);
 
       originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
@@ -175,8 +190,20 @@ http.interceptors.response.use(
 
       useAuthStore.getState().clearSession();
 
-      if (typeof window !== "undefined") {
-        window.location.href = "/login";
+      /*
+       * Axios interceptors are outside the React component tree,
+       * so useRouter() cannot be called here directly.
+       *
+       * Use a browser history navigation instead of
+       * assigning window.location.href.
+       */
+      if (
+        typeof window !== "undefined" &&
+        window.location.pathname !== "/login"
+      ) {
+        window.history.pushState({}, "", "/login");
+
+        window.dispatchEvent(new PopStateEvent("popstate"));
       }
 
       return Promise.reject(

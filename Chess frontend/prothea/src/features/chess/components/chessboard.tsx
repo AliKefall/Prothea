@@ -161,10 +161,10 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     null,
   );
 
-  /*
-   * Prefer the live server position when one is available.
-   * Otherwise fall back to the latest persisted board state.
-   */
+  const [drawOfferSent, setDrawOfferSent] = useState(false);
+
+  const [drawOfferReceived, setDrawOfferReceived] = useState(false);
+
   const position = livePosition ?? latestPosition;
 
   /*
@@ -265,6 +265,9 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
         setFinishResult(payload);
         setClockNow(Date.now());
 
+        setDrawOfferSent(false);
+        setDrawOfferReceived(false);
+
         /*
          * Synchronize the cached match with the authoritative
          * result received from the WebSocket server.
@@ -285,6 +288,30 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
           },
         );
 
+        return;
+      }
+
+      if (message.type === "game_draw_offer") {
+        const payload = message.payload as { match_id?: string };
+
+        if (!payload || payload.match_id !== matchId) {
+          return;
+        }
+
+        setDrawOfferReceived(true);
+        setDrawOfferSent(false);
+
+        return;
+      }
+
+      if (message.type === "game_draw_decline") {
+        const payload = message.payload as { match_id?: string };
+
+        if (!payload || payload.match_id !== matchId) {
+          return;
+        }
+
+        setDrawOfferSent(false);
         return;
       }
 
@@ -650,7 +677,47 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                 </div>
               )}
             </div>
+            {drawOfferReceived && !gameFinished && (
+              <div className="border-t border-zinc-800 px-5 py-4">
+                <div className="mb-3">
+                  <p className="text-sm font-semibold">Draw offer</p>
 
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Your opponent has offered a draw.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      websocketManager.send("game_draw_accept", {
+                        match_id: matchId,
+                      });
+
+                      setDrawOfferReceived(false);
+                    }}
+                    className="rounded-lg bg-white px-4 py-2.5 text-sm font-medium text-black transition hover:bg-zinc-200"
+                  >
+                    Accept
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      websocketManager.send("game_draw_decline", {
+                        match_id: matchId,
+                      });
+
+                      setDrawOfferReceived(false);
+                    }}
+                    className="rounded-lg border border-zinc-700 px-4 py-2.5 text-sm font-medium text-zinc-300 transition hover:bg-zinc-800"
+                  >
+                    Decline
+                  </button>
+                </div>
+              </div>
+            )}
             {gameFinished && finishResult && (
               <GameResult
                 result={finishResult.result}
@@ -663,32 +730,42 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
               />
             )}
             {/* Match controls */}
-            {!gameFinished && (
-              <div className="border-t border-zinc-800 p-4">
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    className="rounded-lg border border-zinc-700 px-4 py-2.5 text-sm font-medium text-zinc-300 transition hover:bg-zinc-800"
-                  >
-                    Draw
-                  </button>
+            {!gameFinished && !drawOfferReceived && (
+  <div className="border-t border-zinc-800 p-4">
+    <div className="grid grid-cols-2 gap-2">
+      <button
+        type="button"
+        disabled={
+          match.result !== "pending" ||
+          drawOfferSent
+        }
+        onClick={() => {
+          websocketManager.send("game_draw_offer", {
+            match_id: matchId,
+          });
 
-                  <button
-  type="button"
-  disabled={gameFinished || match.result !== "pending"}
-  onClick={() => {
-    websocketManager.send("game_resign", {
-      match_id: matchId,
-    });
-  }}
-  className="rounded-lg bg-red-500/10 px-4 py-2.5 text-sm font-medium text-red-400 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
->
-  Resign
-</button>
-                </div>
-              </div>
-            )}
-          </aside>
+          setDrawOfferSent(true);
+        }}
+        className="rounded-lg border border-zinc-700 px-4 py-2.5 text-sm font-medium text-zinc-300 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {drawOfferSent ? "Draw offered" : "Draw"}
+      </button>
+
+      <button
+        type="button"
+        disabled={match.result !== "pending"}
+        onClick={() => {
+          websocketManager.send("game_resign", {
+            match_id: matchId,
+          });
+        }}
+        className="rounded-lg bg-red-500/10 px-4 py-2.5 text-sm font-medium text-red-400 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Resign
+      </button>
+    </div>
+  </div>
+)}          </aside>
         </div>
       </div>
     </div>

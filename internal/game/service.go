@@ -850,7 +850,7 @@ func (s *Service) OfferDraw(
 	)
 }
 
-func (s *Service) AccepDraw(
+func (s *Service) AcceptDraw(
 	ctx context.Context,
 	matchID uuid.UUID,
 	playerID uuid.UUID,
@@ -938,7 +938,7 @@ func (s *Service) RejectDraw(
 		return err
 	}
 
-	if !state.IsActive(){
+	if !state.IsActive() {
 		return ErrGameNotActive
 	}
 
