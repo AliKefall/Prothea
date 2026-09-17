@@ -7,10 +7,16 @@ import (
 	"github.com/google/uuid"
 )
 
-func (s *Service) DequeuePlayer(ctx context.Context, userID uuid.UUID, timeControl string) error {
+
+func (s *Service) DequeuePlayer(
+	ctx context.Context,
+	userID uuid.UUID,
+	timeControl string,
+) error {
 	if s == nil || s.Redis == nil {
-		return errors.New("Matchmaking redis client is nil ")
+		return errors.New("matchmaking redis client is nil")
 	}
+
 	if userID == uuid.Nil {
 		return errors.New("user_id is required")
 	}
@@ -20,16 +26,23 @@ func (s *Service) DequeuePlayer(ctx context.Context, userID uuid.UUID, timeContr
 		return err
 	}
 
-	removed, err := s.Redis.Eval(ctx, string(script), []string{
-		"matchmaking:queue:" + timeControl,
-		"matchmaking:user:" + userID.String(),
-	}).Int()
+	removed, err := s.Redis.Eval(
+		ctx,
+		string(script),
+		[]string{
+			"matchmaking:queue:" + timeControl,
+			"matchmaking:user:" + userID.String(),
+		},
+		userID.String(),
+	).Int()
 
 	if err != nil {
 		return err
 	}
-	if removed == 0{
+
+	if removed == 0 {
 		return ErrNotQueued
 	}
+
 	return nil
 }

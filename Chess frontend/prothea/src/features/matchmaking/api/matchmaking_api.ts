@@ -33,7 +33,7 @@ export async function dequeueMatchmaking(
   timeControl: string,
 ): Promise<DequeueResponse> {
   const response = await http.delete<DequeueResponse>(
-    "/matchmaking/queue",
+    "/matchmaking/dequeue",
     {
       data: {
         time_control: timeControl,

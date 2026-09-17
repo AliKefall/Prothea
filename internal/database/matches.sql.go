@@ -382,46 +382,69 @@ func (q *Queries) GetMatchState(ctx context.Context, id uuid.UUID) (GetMatchStat
 	return i, err
 }
 
-const getPlayerMatches = `-- name: GetPlayerMatches :many
+const getPlayerRecentMatches = `-- name: GetPlayerRecentMatches :many
 SELECT
-    id,
-    white_id,
-    black_id,
-    time_control,
-    white_rating_before,
-    black_rating_before,
-    white_rating_after,
-    black_rating_after,
-    result,
-    created_at,
-    finished_at
-FROM matches
-WHERE white_id = $1
-   OR black_id = $1
-ORDER BY created_at DESC
+    m.id,
+    m.white_id,
+    white_user.username AS white_username,
+    m.black_id,
+    black_user.username AS black_username,
+    m.time_control,
+    m.white_rating_before,
+    m.black_rating_before,
+    m.white_rating_after,
+    m.black_rating_after,
+    m.result,
+    m.created_at,
+    m.finished_at
+FROM matches AS m
+INNER JOIN users AS white_user
+    ON white_user.id = m.white_id
+INNER JOIN users AS black_user
+    ON black_user.id = m.black_id
+WHERE
+    (m.white_id = $1 OR m.black_id = $1)
+    AND m.result <> 'pending'
+ORDER BY m.finished_at DESC
 LIMIT $2
-OFFSET $3
 `
 
-type GetPlayerMatchesParams struct {
+type GetPlayerRecentMatchesParams struct {
 	WhiteID uuid.UUID
 	Limit   int32
-	Offset  int32
 }
 
-func (q *Queries) GetPlayerMatches(ctx context.Context, arg GetPlayerMatchesParams) ([]Match, error) {
-	rows, err := q.db.QueryContext(ctx, getPlayerMatches, arg.WhiteID, arg.Limit, arg.Offset)
+type GetPlayerRecentMatchesRow struct {
+	ID                uuid.UUID
+	WhiteID           uuid.UUID
+	WhiteUsername     string
+	BlackID           uuid.UUID
+	BlackUsername     string
+	TimeControl       string
+	WhiteRatingBefore int32
+	BlackRatingBefore int32
+	WhiteRatingAfter  sql.NullInt32
+	BlackRatingAfter  sql.NullInt32
+	Result            MatchResult
+	CreatedAt         time.Time
+	FinishedAt        sql.NullTime
+}
+
+func (q *Queries) GetPlayerRecentMatches(ctx context.Context, arg GetPlayerRecentMatchesParams) ([]GetPlayerRecentMatchesRow, error) {
+	rows, err := q.db.QueryContext(ctx, getPlayerRecentMatches, arg.WhiteID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Match
+	var items []GetPlayerRecentMatchesRow
 	for rows.Next() {
-		var i Match
+		var i GetPlayerRecentMatchesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.WhiteID,
+			&i.WhiteUsername,
 			&i.BlackID,
+			&i.BlackUsername,
 			&i.TimeControl,
 			&i.WhiteRatingBefore,
 			&i.BlackRatingBefore,

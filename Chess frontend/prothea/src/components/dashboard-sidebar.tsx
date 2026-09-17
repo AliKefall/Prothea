@@ -37,9 +37,9 @@ export function DashboardSidebar() {
   };
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-zinc-800 bg-zinc-950">
+    <aside className="fixed inset-y-0 left-0 z-50 flex h-screen w-64 flex-col border-r border-zinc-800 bg-zinc-950">
       {/* Header */}
-      <div className="flex h-16 items-center border-b border-zinc-800 px-6">
+      <div className="flex h-16 shrink-0 items-center border-b border-zinc-800 px-6">
         <Link
           href="/dashboard"
           className="font-heading text-xl font-bold tracking-wide text-white"
@@ -49,11 +49,12 @@ export function DashboardSidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 p-4">
+      <nav className="flex-1 overflow-y-auto p-4">
         <div className="space-y-1">
           {navigation.map((item) => {
             const active =
-              pathname === item.href || pathname.startsWith(`${item.href}/`);
+              pathname === item.href ||
+              pathname.startsWith(`${item.href}/`);
 
             return (
               <Link
@@ -74,7 +75,7 @@ export function DashboardSidebar() {
       </nav>
 
       {/* User */}
-      <div className="border-t border-zinc-800 p-4">
+      <div className="shrink-0 border-t border-zinc-800 p-4">
         <div className="mb-3 rounded-lg bg-zinc-900 p-3">
           <p className="truncate text-sm font-semibold text-white">
             {user?.username ?? "User"}
@@ -82,7 +83,6 @@ export function DashboardSidebar() {
 
           <div className="mt-1 flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-green-500" />
-
             <span className="text-xs text-zinc-500">Online</span>
           </div>
         </div>
@@ -106,3 +106,4 @@ export function DashboardSidebar() {
     </aside>
   );
 }
+

@@ -3,19 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { Chess, type Square } from "chess.js";
 import { Chessboard, type PieceDropHandlerArgs } from "react-chessboard";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { useAuthStore } from "@/features/auth/auth-store";
 import { websocketManager } from "@/lib/websocket";
 
 import { useMatch } from "../hooks/use-match";
 import { useMatchMoves } from "../hooks/use-match-moves";
-import { useQueryClient } from "@tanstack/react-query";
 import { GameResult } from "./game-result";
+import { GameClock } from "./game-clock";
 
 const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-
-//NOTE: Tidy up this place, types and game logic must be sepearated.
-//This one stays like this just for testing rn
 
 interface ChessBoardProps {
   matchId: string;
@@ -36,27 +34,35 @@ interface GameMovePayload {
   last_move_at: string;
 }
 
+interface GameMove {
+  move_number: number;
+  player_id: string;
+  from: string;
+  to: string;
+  promotion?: string;
+  uci: string;
+  san: string;
+  fen_after: string;
+  white_time_ms: number;
+  black_time_ms: number;
+  created_at: string;
+}
+
 interface WebSocketGameMoveMessage {
-  type: string;
+  type: "game_move";
   payload: GameMovePayload;
 }
 
 interface GameFinishedPayload {
   match_id: string;
-
   result: "white" | "black" | "draw" | "abandoned";
-
   winner_id: string;
   loser_id: string;
-
   reason: string;
-
   white_rating_before: number;
   white_rating_after: number;
-
   black_rating_before: number;
   black_rating_after: number;
-
   created_at: string;
 }
 
@@ -65,7 +71,7 @@ interface WebSocketGameFinishedMessage {
   payload: GameFinishedPayload;
 }
 
-interface ClockSnapshot {
+interface GameClockState {
   whiteTimeMs: number;
   blackTimeMs: number;
   lastMoveAt: number | null;
@@ -86,13 +92,14 @@ function parseInitialTimeMs(timeControl: string | undefined): number {
   return parsedMinutes * 60 * 1000;
 }
 
-function formatClock(timeMs: number): string {
-  const totalSeconds = Math.max(0, Math.ceil(timeMs / 1000));
+function parseTimestamp(value: string | undefined): number | null {
+  if (!value) {
+    return null;
+  }
 
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
+  const timestamp = Date.parse(value);
 
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 export function ChessBoard({ matchId }: ChessBoardProps) {
@@ -107,18 +114,57 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
 
   const { data: movesData, isLoading: isMovesLoading } = useMatchMoves(matchId);
 
-  /*
-   * Memoize the fallback array so an undefined query result
-   * does not produce a new reference during every render.
-   */
-  const moves = useMemo(() => {
-    return movesData ?? [];
-  }, [movesData]);
+  const [liveMoves, setLiveMoves] = useState<GameMove[]>([]);
+  const [livePosition, setLivePosition] = useState<string | null>(null);
 
-  /*
-   * REST gives us the latest persisted board position.
-   * The initial FEN is used until the first move exists.
-   */
+  const [clockSnapshot, setClockSnapshot] = useState<GameClockState | null>(
+    null,
+  );
+
+  const [gameFinished, setGameFinished] = useState(false);
+  const [finishResult, setFinishResult] = useState<GameFinishedPayload | null>(
+    null,
+  );
+
+  const [drawOfferSent, setDrawOfferSent] = useState(false);
+  const [drawOfferReceived, setDrawOfferReceived] = useState(false);
+
+  const moves = useMemo<GameMove[]>(() => {
+    const merged = new Map<number, GameMove>();
+
+    for (const move of movesData ?? []) {
+      if (!move.uci || move.uci.length < 4) {
+        continue;
+      }
+
+      const from = move.uci.slice(0, 2);
+      const to = move.uci.slice(2, 4);
+      const promotion = move.uci.length > 4 ? move.uci.slice(4) : undefined;
+
+      merged.set(move.move_number, {
+        move_number: move.move_number,
+        player_id: move.player_id,
+        from,
+        to,
+        promotion,
+        uci: move.uci,
+        san: move.san,
+        fen_after: move.fen_after,
+        white_time_ms: move.white_time_ms,
+        black_time_ms: move.black_time_ms,
+        created_at: move.created_at,
+      });
+    }
+
+    for (const move of liveMoves) {
+      merged.set(move.move_number, move);
+    }
+
+    return Array.from(merged.values()).sort(
+      (a, b) => a.move_number - b.move_number,
+    );
+  }, [movesData, liveMoves]);
+
   const latestPosition = useMemo(() => {
     if (moves.length === 0) {
       return STARTING_FEN;
@@ -127,73 +173,22 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     return moves[moves.length - 1].fen_after;
   }, [moves]);
 
-  /*
-   * WebSocket updates may arrive after the initial HTTP request.
-   * This state stores the newest server-authoritative position.
-   */
-  const [livePosition, setLivePosition] = useState<string | null>(null);
-
-  /*
-   * Keep the latest clock snapshot received from the backend.
-   * The client derives the visible countdown from this anchor.
-   */
-  const [clockSnapshot, setClockSnapshot] = useState<ClockSnapshot | null>(
-    null,
-  );
-
-  /*
-   * This timestamp drives the visual clock only.
-   * Actual game time is still controlled by the backend.
-   */
-  const [clockNow, setClockNow] = useState(() => Date.now());
-
-  /*
-   * A finished flag prevents new local interactions after the
-   * server declares the match over.
-   */
-  const [gameFinished, setGameFinished] = useState(false);
-
-  /*
-   * Store the complete finish payload so the UI can display
-   * the final result and updated ratings.
-   */
-  const [finishResult, setFinishResult] = useState<GameFinishedPayload | null>(
-    null,
-  );
-
-  const [drawOfferSent, setDrawOfferSent] = useState(false);
-
-  const [drawOfferReceived, setDrawOfferReceived] = useState(false);
-
   const position = livePosition ?? latestPosition;
 
-  /*
-   * Chess.js is derived from the current FEN rather than stored
-   * as mutable React state.
-   */
   const game = useMemo(() => {
-    return new Chess(position);
+    try {
+      return new Chess(position);
+    } catch {
+      return new Chess(STARTING_FEN);
+    }
   }, [position]);
 
-  /*
-   * Convert the match time control into milliseconds.
-   *
-   * Examples:
-   * 10+0 -> 600000 ms
-   * 5+3  -> 300000 ms
-   */
-  const initialTimeMs = useMemo(() => {
-    return parseInitialTimeMs(match?.time_control);
-  }, [match?.time_control]);
+  const initialTimeMs = useMemo(
+    () => parseInitialTimeMs(match?.time_control),
+    [match?.time_control],
+  );
 
-  /*
-   * Reconstruct the clock when the page is loaded from REST.
-   *
-   * Before the first move, neither player has consumed any time.
-   * After moves exist, the most recent move timestamp acts as the
-   * local reference point for the current clock snapshot.
-   */
-  const baseClock = useMemo<ClockSnapshot>(() => {
+  const baseClock = useMemo<GameClockState>(() => {
     const lastMove = moves[moves.length - 1];
 
     if (!lastMove) {
@@ -204,44 +199,17 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
       };
     }
 
-    const lastMoveAt = Date.parse(lastMove.created_at);
+    const lastMoveAt = parseTimestamp(lastMove.created_at);
 
     return {
       whiteTimeMs: lastMove.white_time_ms,
       blackTimeMs: lastMove.black_time_ms,
-      lastMoveAt: Number.isFinite(lastMoveAt) ? lastMoveAt : null,
+      lastMoveAt,
     };
   }, [moves, initialTimeMs]);
 
   const effectiveClock = clockSnapshot ?? baseClock;
 
-  /*
-   * Refresh the displayed clock only while the match is active.
-   * A 250 ms interval keeps the countdown visually smooth.
-   */
-  useEffect(() => {
-    if (
-      match?.result !== "pending" ||
-      gameFinished ||
-      effectiveClock.lastMoveAt === null
-    ) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      setClockNow(Date.now());
-    }, 250);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [match?.result, gameFinished, effectiveClock.lastMoveAt]);
-
-  /*
-   * Listen for authoritative game events from the WebSocket layer.
-   * Move events update the board and clock, while finish events
-   * freeze the game and preserve the final result data.
-   */
   useEffect(() => {
     function handleMessage(message: unknown) {
       if (
@@ -255,6 +223,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
 
       if (message.type === "game_finished") {
         const wsMessage = message as WebSocketGameFinishedMessage;
+
         const payload = wsMessage.payload;
 
         if (!payload || payload.match_id !== matchId) {
@@ -263,18 +232,12 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
 
         setGameFinished(true);
         setFinishResult(payload);
-        setClockNow(Date.now());
-
         setDrawOfferSent(false);
         setDrawOfferReceived(false);
 
-        /*
-         * Synchronize the cached match with the authoritative
-         * result received from the WebSocket server.
-         */
-        queryClient.setQueryData<typeof match>(
+        queryClient.setQueryData(
           ["match", matchId],
-          (currentMatch) => {
+          (currentMatch: typeof match) => {
             if (!currentMatch) {
               return currentMatch;
             }
@@ -292,7 +255,9 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
       }
 
       if (message.type === "game_draw_offer") {
-        const payload = message.payload as { match_id?: string };
+        const payload = message.payload as {
+          match_id?: string;
+        };
 
         if (!payload || payload.match_id !== matchId) {
           return;
@@ -305,13 +270,16 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
       }
 
       if (message.type === "game_draw_decline") {
-        const payload = message.payload as { match_id?: string };
+        const payload = message.payload as {
+          match_id?: string;
+        };
 
         if (!payload || payload.match_id !== matchId) {
           return;
         }
 
         setDrawOfferSent(false);
+
         return;
       }
 
@@ -320,48 +288,57 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
       }
 
       const wsMessage = message as WebSocketGameMoveMessage;
+
       const payload = wsMessage.payload;
 
       if (!payload || payload.match_id !== matchId) {
         return;
       }
 
-      const lastMoveAt = Date.parse(payload.last_move_at);
+      const lastMoveAt = parseTimestamp(payload.last_move_at);
 
-      if (!Number.isFinite(lastMoveAt)) {
+      if (lastMoveAt === null) {
         console.error(
           "Received an invalid move timestamp:",
           payload.last_move_at,
         );
-
         return;
       }
 
       try {
-        /*
-         * Reject malformed board positions before touching the
-         * visible state.
-         */
         new Chess(payload.fen_after);
 
-        /*
-         * Apply the server's canonical FEN to the local board.
-         */
+        const newMove: GameMove = {
+          move_number: payload.move_number,
+          player_id: payload.player_id,
+          from: payload.from,
+          to: payload.to,
+          promotion: payload.promotion,
+          uci: payload.uci,
+          san: payload.san,
+          fen_after: payload.fen_after,
+          white_time_ms: payload.white_time_ms,
+          black_time_ms: payload.black_time_ms,
+          created_at: payload.last_move_at,
+        };
+
         setLivePosition(payload.fen_after);
 
-        /*
-         * Replace the local clock anchor with the backend snapshot.
-         */
+        setLiveMoves((currentMoves) => {
+          const filtered = currentMoves.filter(
+            (move) => move.move_number !== payload.move_number,
+          );
+
+          return [...filtered, newMove].sort(
+            (a, b) => a.move_number - b.move_number,
+          );
+        });
+
         setClockSnapshot({
           whiteTimeMs: payload.white_time_ms,
           blackTimeMs: payload.black_time_ms,
           lastMoveAt,
         });
-
-        /*
-         * Re-anchor the client-side visual countdown immediately.
-         */
-        setClockNow(Date.now());
       } catch (error) {
         console.error(
           "Unable to apply the chess position received over WebSocket:",
@@ -370,35 +347,20 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
       }
     }
 
-    const unsubscribe = websocketManager.subscribe(handleMessage);
-
-    return unsubscribe;
+    return websocketManager.subscribe(handleMessage);
   }, [matchId, queryClient]);
 
-  /*
-   * The elapsed duration is used only to animate the active player's
-   * clock between authoritative backend updates.
-   */
-  const elapsedMs =
-    effectiveClock.lastMoveAt === null
-      ? 0
-      : Math.max(0, clockNow - effectiveClock.lastMoveAt);
+  useEffect(() => {
+    if (!match || match.result === "pending") {
+      return;
+    }
 
-  const isWhiteTurn = game.turn() === "w";
+    setGameFinished(true);
+  }, [match]);
 
-  const whiteDisplayTime = Math.max(
-    0,
-    effectiveClock.whiteTimeMs - (isWhiteTurn ? elapsedMs : 0),
-  );
-
-  const blackDisplayTime = Math.max(
-    0,
-    effectiveClock.blackTimeMs - (!isWhiteTurn ? elapsedMs : 0),
-  );
-
-  if (isMatchLoading) {
+  if (isMatchLoading || isMovesLoading) {
     return (
-      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-zinc-950 text-white">
+      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
         <p className="text-sm text-zinc-500">Loading game...</p>
       </div>
     );
@@ -406,9 +368,11 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
 
   if (isMatchError || !match || !user) {
     return (
-      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-zinc-950 text-white">
+      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
         <div className="text-center">
-          <p className="text-sm font-semibold">Unable to load game</p>
+          <p className="text-sm font-semibold text-white">
+            Unable to load game
+          </p>
 
           <p className="mt-1 text-xs text-zinc-500">
             Game information could not be loaded.
@@ -418,356 +382,274 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     );
   }
 
-  const isWhite = match.white_id === user.user_id;
+  const currentMatch = match;
 
-  const myColor = isWhite ? "w" : "b";
+  const isWhitePlayer = currentMatch.white_player_id === user.id;
+  const isBlackPlayer = currentMatch.black_player_id === user.id;
 
-  const myUsername = isWhite ? match.white_username : match.black_username;
+  const playerColor: "w" | "b" = isWhitePlayer ? "w" : "b";
 
-  const myRating = isWhite ? match.white_rating : match.black_rating;
+  const isMyTurn =
+    !gameFinished &&
+    currentMatch.result === "pending" &&
+    game.turn() === playerColor;
 
-  const opponentUsername = isWhite
-    ? match.black_username
-    : match.white_username;
+  const whiteClockActive =
+    !gameFinished && currentMatch.result === "pending" && game.turn() === "w";
 
-  const opponentRating = isWhite ? match.black_rating : match.white_rating;
+  const blackClockActive =
+    !gameFinished && currentMatch.result === "pending" && game.turn() === "b";
 
   function handlePieceDrop({
     sourceSquare,
     targetSquare,
+    piece,
   }: PieceDropHandlerArgs): boolean {
+    if (!isMyTurn) {
+      return false;
+    }
+
     if (!targetSquare) {
       return false;
     }
 
-    /*
-     * Do not allow moves after the server has ended the match.
-     */
-    if (gameFinished || match?.result !== "pending") {
-      return false;
-    }
+    const from = sourceSquare as Square;
+    const to = targetSquare as Square;
 
-    /*
-     * Confirm that the source square contains a real piece.
-     */
-    const piece = game.get(sourceSquare as Square);
+    const promotion =
+      piece.endsWith("P") && to[1] === "8"
+        ? "q"
+        : piece.endsWith("P") && to[1] === "1"
+          ? "q"
+          : undefined;
 
-    if (!piece) {
-      return false;
-    }
-
-    /*
-     * The client blocks attempts to move an opponent's piece.
-     */
-    if (piece.color !== myColor) {
-      return false;
-    }
-
-    /*
-     * This is only a UI-side guard.
-     * The backend performs the authoritative turn validation.
-     */
-    if (game.turn() !== myColor) {
-      return false;
-    }
+    const localGame = new Chess(game.fen());
 
     try {
-      /*
-       * Validate the move using a temporary Chess.js instance.
-       * The visible board remains untouched until the server
-       * accepts and broadcasts the move.
-       */
-      const nextGame = new Chess(game.fen());
-
-      const move = nextGame.move({
-        from: sourceSquare,
-        to: targetSquare,
-        promotion: "q",
+      const move = localGame.move({
+        from,
+        to,
+        promotion,
       });
 
       if (!move) {
         return false;
       }
 
-      const uci = `${sourceSquare}${targetSquare}` + `${move.promotion ?? ""}`;
-
-      /*
-       * Send the candidate move to the backend.
-       *
-       * No local board mutation occurs here. The authoritative
-       * game_move event is responsible for changing the position.
-       */
-      websocketManager.send("game_move", {
-        match_id: matchId,
-        from: sourceSquare,
-        to: targetSquare,
-        promotion: move.promotion ?? "",
-        uci,
-      });
+      websocketManager.send(
+        JSON.stringify({
+          type: "game_move",
+          payload: {
+            match_id: matchId,
+            from,
+            to,
+            promotion,
+            uci: `${from}${to}${promotion ?? ""}`,
+          },
+        }),
+      );
 
       return true;
-    } catch (error) {
-      console.error("Failed to create chess move:", error);
-
+    } catch {
       return false;
     }
   }
 
+  function handleResign() {
+    if (gameFinished || currentMatch.result !== "pending") {
+      return;
+    }
+
+    websocketManager.send(
+      JSON.stringify({
+        type: "game_resign",
+        payload: {
+          match_id: matchId,
+        },
+      }),
+    );
+  }
+
+  function handleDrawOffer() {
+    if (gameFinished || currentMatch.result !== "pending" || drawOfferSent) {
+      return;
+    }
+
+    websocketManager.send(
+      JSON.stringify({
+        type: "game_draw_offer",
+        payload: {
+          match_id: matchId,
+        },
+      }),
+    );
+
+    setDrawOfferSent(true);
+  }
+
+  function handleDrawAccept() {
+    if (!drawOfferReceived) {
+      return;
+    }
+
+    websocketManager.send(
+      JSON.stringify({
+        type: "game_draw_accept",
+        payload: {
+          match_id: matchId,
+        },
+      }),
+    );
+
+    setDrawOfferReceived(false);
+  }
+
+  function handleDrawDecline() {
+    if (!drawOfferReceived) {
+      return;
+    }
+
+    websocketManager.send(
+      JSON.stringify({
+        type: "game_draw_decline",
+        payload: {
+          match_id: matchId,
+        },
+      }),
+    );
+
+    setDrawOfferReceived(false);
+  }
+
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-zinc-950 p-6 text-white">
-      <div className="mx-auto flex h-full w-full max-w-6xl items-center justify-center">
-        <div className="grid w-full grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-          {/* Main chess area */}
-          <section className="flex min-w-0 flex-col items-center">
-            {/* Opponent information and clock */}
-            <div className="mb-3 flex w-full max-w-130 items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-800 text-sm font-bold">
-                  {opponentUsername.charAt(0).toUpperCase()}
-                </div>
-
-                <div>
-                  <p className="text-sm font-semibold">{opponentUsername}</p>
-
-                  <p className="text-xs text-zinc-500">
-                    {finishResult
-                      ? isWhite
-                        ? finishResult.black_rating_after
-                        : finishResult.white_rating_after
-                      : opponentRating}
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2">
-                <span className="font-mono text-xl font-bold">
-                  {formatClock(isWhite ? blackDisplayTime : whiteDisplayTime)}
-                </span>
-              </div>
-            </div>
-
-            {/* Chess board */}
-            <div className="w-full max-w-130 overflow-hidden rounded-lg shadow-2xl">
-              <Chessboard
-                options={{
-                  position,
-                  boardOrientation: isWhite ? "white" : "black",
-                  allowDragging: !gameFinished && match.result === "pending",
-                  onPieceDrop: handlePieceDrop,
-                }}
-              />
-            </div>
-
-            {/* Current player information and clock */}
-            <div className="mt-3 flex w-full max-w-130 items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100 text-sm font-bold text-black">
-                  {myUsername.charAt(0).toUpperCase()}
-                </div>
-
-                <div>
-                  <p className="text-sm font-semibold">{myUsername}</p>
-
-                  <p className="text-xs text-zinc-500">
-                    {finishResult
-                      ? isWhite
-                        ? finishResult.white_rating_after
-                        : finishResult.black_rating_after
-                      : myRating}
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-lg bg-white px-4 py-2 text-black">
-                <span className="font-mono text-xl font-bold">
-                  {formatClock(isWhite ? whiteDisplayTime : blackDisplayTime)}
-                </span>
-              </div>
-            </div>
-
-            <p className="mt-3 max-w-130 truncate font-mono text-[10px] text-zinc-700">
-              {match.id}
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 lg:flex-row">
+      <div className="flex min-w-0 flex-1 flex-col gap-4">
+        <div className="flex items-center justify-between rounded-lg bg-zinc-900 px-4 py-3">
+          <div>
+            <p className="text-sm font-medium text-white">
+              {currentMatch.black_username}
             </p>
-          </section>
 
-          {/* Game information sidebar */}
-          <aside className="flex h-130 flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900">
-            {/* Match header */}
-            <div className="border-b border-zinc-800 px-5 py-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-sm font-semibold">Game</h2>
+            <p className="text-xs text-zinc-500">Black</p>
+          </div>
 
-                  <p className="mt-1 text-xs text-zinc-500">
-                    Rated · {match.time_control}
-                  </p>
-                </div>
+          <GameClock
+            timeMs={effectiveClock.blackTimeMs}
+            lastMoveAt={effectiveClock.lastMoveAt}
+            active={blackClockActive}
+          />
+        </div>
 
-                <span className="rounded-md bg-zinc-800 px-2 py-1 text-xs text-zinc-400">
-                  {gameFinished
-                    ? "Finished"
-                    : match.result === "pending"
-                      ? "Ongoing"
-                      : match.result}
-                </span>
-              </div>
-            </div>
+        <div className="mx-auto w-full max-w-[720px]">
+          <Chessboard
+            position={position}
+            onPieceDrop={handlePieceDrop}
+            boardOrientation={playerColor === "w" ? "white" : "black"}
+            arePiecesDraggable={isMyTurn}
+            animationDuration={150}
+          />
+        </div>
 
-            {/* Move history */}
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              {isMovesLoading ? (
-                <div className="flex h-full items-center justify-center">
-                  <p className="text-sm text-zinc-500">Loading moves...</p>
-                </div>
-              ) : moves.length === 0 ? (
-                <div className="flex h-full items-center justify-center">
-                  <p className="text-sm text-zinc-500">No moves yet.</p>
-                </div>
+        <div className="flex items-center justify-between rounded-lg bg-zinc-900 px-4 py-3">
+          <div>
+            <p className="text-sm font-medium text-white">
+              {currentMatch.white_username}
+            </p>
+
+            <p className="text-xs text-zinc-500">White</p>
+          </div>
+
+          <GameClock
+            timeMs={effectiveClock.whiteTimeMs}
+            lastMoveAt={effectiveClock.lastMoveAt}
+            active={whiteClockActive}
+          />
+        </div>
+      </div>
+
+      <aside className="w-full shrink-0 lg:w-80">
+        <div className="flex flex-col gap-4 rounded-lg bg-zinc-900 p-4">
+          <div>
+            <h2 className="text-sm font-semibold text-white">Moves</h2>
+
+            <div className="mt-3 max-h-96 overflow-y-auto">
+              {moves.length === 0 ? (
+                <p className="text-xs text-zinc-500">No moves yet.</p>
               ) : (
-                <div className="overflow-hidden rounded-lg border border-zinc-800">
-                  {/* Move table heading */}
-                  <div className="grid grid-cols-[36px_1fr_1fr] bg-zinc-950 text-xs text-zinc-500">
-                    <div className="px-3 py-2">#</div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                  {moves.map((move, index) => (
+                    <div
+                      key={move.move_number}
+                      className="flex items-center gap-2 text-sm"
+                    >
+                      <span className="w-6 text-right text-xs text-zinc-600">
+                        {index + 1}.
+                      </span>
 
-                    <div className="px-3 py-2">White</div>
-
-                    <div className="px-3 py-2">Black</div>
-                  </div>
-
-                  {/* Pair white and black moves by move number */}
-                  {Array.from(
-                    {
-                      length: Math.ceil(moves.length / 2),
-                    },
-                    (_, index) => {
-                      const whiteMove = moves[index * 2];
-
-                      const blackMove = moves[index * 2 + 1];
-
-                      return (
-                        <div
-                          key={index + 1}
-                          className="grid grid-cols-[36px_1fr_1fr] border-t border-zinc-800 text-sm"
-                        >
-                          <div className="px-3 py-2 text-zinc-600">
-                            {index + 1}.
-                          </div>
-
-                          <div
-                            className={[
-                              "px-3 py-2",
-                              whiteMove ? "text-zinc-300" : "text-zinc-700",
-                            ].join(" ")}
-                          >
-                            {whiteMove?.san ?? ""}
-                          </div>
-
-                          <div
-                            className={[
-                              "px-3 py-2",
-                              blackMove ? "text-zinc-300" : "text-zinc-700",
-                            ].join(" ")}
-                          >
-                            {blackMove?.san ?? ""}
-                          </div>
-                        </div>
-                      );
-                    },
-                  )}
+                      <span className="text-zinc-300">{move.san}</span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
-            {drawOfferReceived && !gameFinished && (
-              <div className="border-t border-zinc-800 px-5 py-4">
-                <div className="mb-3">
-                  <p className="text-sm font-semibold">Draw offer</p>
+          </div>
 
-                  <p className="mt-1 text-xs text-zinc-500">
-                    Your opponent has offered a draw.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
+          {!gameFinished && currentMatch.result === "pending" && (
+            <div className="flex flex-col gap-2">
+              {drawOfferReceived ? (
+                <div className="flex gap-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      websocketManager.send("game_draw_accept", {
-                        match_id: matchId,
-                      });
-
-                      setDrawOfferReceived(false);
-                    }}
-                    className="rounded-lg bg-white px-4 py-2.5 text-sm font-medium text-black transition hover:bg-zinc-200"
+                    onClick={handleDrawAccept}
+                    className="flex-1 rounded-md bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900"
                   >
-                    Accept
+                    Accept draw
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => {
-                      websocketManager.send("game_draw_decline", {
-                        match_id: matchId,
-                      });
-
-                      setDrawOfferReceived(false);
-                    }}
-                    className="rounded-lg border border-zinc-700 px-4 py-2.5 text-sm font-medium text-zinc-300 transition hover:bg-zinc-800"
+                    onClick={handleDrawDecline}
+                    className="flex-1 rounded-md bg-zinc-800 px-3 py-2 text-sm font-medium text-white"
                   >
                     Decline
                   </button>
                 </div>
-              </div>
-            )}
-            {gameFinished && finishResult && (
-              <GameResult
-                result={finishResult.result}
-                reason={finishResult.reason}
-                isWhite={isWhite}
-                whiteRatingBefore={finishResult.white_rating_before}
-                whiteRatingAfter={finishResult.white_rating_after}
-                blackRatingBefore={finishResult.black_rating_before}
-                blackRatingAfter={finishResult.black_rating_after}
-              />
-            )}
-            {/* Match controls */}
-            {!gameFinished && !drawOfferReceived && (
-  <div className="border-t border-zinc-800 p-4">
-    <div className="grid grid-cols-2 gap-2">
-      <button
-        type="button"
-        disabled={
-          match.result !== "pending" ||
-          drawOfferSent
-        }
-        onClick={() => {
-          websocketManager.send("game_draw_offer", {
-            match_id: matchId,
-          });
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleDrawOffer}
+                  disabled={drawOfferSent}
+                  className="rounded-md bg-zinc-800 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {drawOfferSent ? "Draw offered" : "Offer draw"}
+                </button>
+              )}
 
-          setDrawOfferSent(true);
-        }}
-        className="rounded-lg border border-zinc-700 px-4 py-2.5 text-sm font-medium text-zinc-300 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {drawOfferSent ? "Draw offered" : "Draw"}
-      </button>
+              <button
+                type="button"
+                onClick={handleResign}
+                className="rounded-md bg-zinc-800 px-3 py-2 text-sm font-medium text-red-400"
+              >
+                Resign
+              </button>
+            </div>
+          )}
 
-      <button
-        type="button"
-        disabled={match.result !== "pending"}
-        onClick={() => {
-          websocketManager.send("game_resign", {
-            match_id: matchId,
-          });
-        }}
-        className="rounded-lg bg-red-500/10 px-4 py-2.5 text-sm font-medium text-red-400 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        Resign
-      </button>
-    </div>
-  </div>
-)}          </aside>
+          {gameFinished && finishResult && (
+            <GameResult
+              result={finishResult.result}
+              winnerId={finishResult.winner_id}
+              loserId={finishResult.loser_id}
+              reason={finishResult.reason}
+              whiteRatingBefore={finishResult.white_rating_before}
+              whiteRatingAfter={finishResult.white_rating_after}
+              blackRatingBefore={finishResult.black_rating_before}
+              blackRatingAfter={finishResult.black_rating_after}
+              userId={user.user_id}
+            />
+          )}
         </div>
-      </div>
+      </aside>
     </div>
   );
 }

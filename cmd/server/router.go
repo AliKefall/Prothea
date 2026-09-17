@@ -72,6 +72,7 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 
 	router.Group(func(pr chi.Router) {
 		pr.Use(deps.AuthMiddleware)
+		pr.Get("/profile", deps.ProfileHandler)
 		pr.Post("/logout", deps.LogoutHandler)
 		pr.Get("/friends", deps.HandleListFriends)
 		pr.Get("/friends/requests", deps.HandleListFriendRequests)
