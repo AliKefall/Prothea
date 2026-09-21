@@ -31,20 +31,22 @@ function getResultLabel(
   return playerWon ? "You won" : "You lost";
 }
 
+// FIX #6: consistent formatting + readable fallback for reasons not listed below
 function formatReason(reason: string): string {
-    switch(reason) {
-        case "timeout":
-            return "Time expired"
-        case "resignation":
-            return "Resignation"
-        case "agreement":
-            return "Draw by agreement"
+  switch (reason) {
+    case "timeout":
+      return "Time expired";
+    case "resignation":
+      return "Resignation";
+    case "agreement":
+      return "Draw by agreement";
+    default: {
+      const readable = reason.replace(/_/g, " ").trim();
 
-        default:
-            return reason
+      return readable.charAt(0).toUpperCase() + readable.slice(1);
     }
+  }
 }
-
 
 export function GameResult({
   result,
