@@ -994,3 +994,110 @@ func parseTimeControl(
 
 	return initialTimeMs, incrementMs, nil
 }
+
+type TimeoutResult struct{
+	MatchID uuid.UUID
+
+	WhiteID uuid.UUID
+	BlackID uuid.UUID
+
+	Finish FinishResult
+}
+
+func (s *Service) ExpireTimeout(
+	ctx context.Context,
+	matchID uuid.UUID,
+) (TimeoutResult, error) {
+	if s == nil {
+		return TimeoutResult{}, errors.New("game service is nil")
+	}
+
+	if s.GameLock == nil {
+		return TimeoutResult{}, errors.New(
+			"game lock is not initialized",
+		)
+	}
+
+	if s.StateStore == nil {
+		return TimeoutResult{}, errors.New(
+			"game state store is not initialized",
+		)
+	}
+
+	release, err := s.GameLock.Acquire(
+		ctx,
+		matchID,
+	)
+
+	if err != nil {
+		return TimeoutResult{}, err
+	}
+
+	defer release()
+
+	state, err := s.StateStore.Get(
+		ctx,
+		matchID,
+	)
+	if err != nil {
+		return TimeoutResult{}, err
+	}
+
+	if !state.IsActive() {
+		return TimeoutResult{}, ErrGameNotActive
+	}
+
+	now := time.Now().UTC()
+
+	elapsedMs := now.Sub(state.LastMoveAt).Milliseconds()
+
+	if elapsedMs < 0 {
+		return TimeoutResult{}, ErrInvalidGameTime
+	}
+
+	var result database.MatchResult
+
+	switch state.Turn {
+	case ColorWhite:
+		if state.WhiteTimeMs - elapsedMs > 0 {
+			return TimeoutResult{}, ErrGameTimeNotExpired
+		}
+
+		state.WhiteTimeMs = 0
+
+		result = database.MatchResultBlack
+
+	case ColorBlack:
+		if state.BlackTimeMs - elapsedMs > 0 {
+			return TimeoutResult{}, ErrGameTimeNotExpired
+		}
+
+		state.BlackTimeMs = 0
+
+		result = database.MatchResultWhite
+
+	default:
+		return TimeoutResult{}, ErrInvalidTurn
+	}
+
+	state.LastMoveAt = now
+
+	finish, err := s.FinishGame(
+		ctx,
+		state,
+		result,
+		"timeout",
+	)
+
+	if err != nil {
+		return TimeoutResult{}, err
+	}
+
+	return TimeoutResult{
+		MatchID: matchID,
+		WhiteID: state.WhiteID,
+		BlackID: state.BlackID,
+		Finish: finish,
+	}, nil
+
+}

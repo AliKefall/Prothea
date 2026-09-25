@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/AliKefall/prothea/internal/game"
 	"github.com/AliKefall/prothea/internal/matchmaking"
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
@@ -51,6 +52,18 @@ func main() {
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
+
+	gameTimeOutWorker := &game.Worker{
+		Service: deps.deps.Game,
+		StateStore: game.NewRedisStateStore(
+			deps.redis,
+		),
+		Hub: deps.hub,
+		PollInterval: game.DefaultTimeoutPollInterval,
+		BatchSize: game.DefaultTimeoutBatchSize,
+	}
+
+	go gameTimeOutWorker.Run(ctx)
 
 	go func() {
 		log.Printf("server listening on %s", server.Addr)

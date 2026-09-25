@@ -17,6 +17,8 @@ var (
 	ErrDrawOfferNotPending = errors.New("draw offer is not pending")
 	ErrNotDrawOfferOwner   = errors.New("player does not own the draw offer")
 	ErrDrawOfferOwner      = errors.New("player has already offered draw")
+
+	ErrGameTimeNotExpired = errors.New("game time has not expired")
 )
 
 type Color string

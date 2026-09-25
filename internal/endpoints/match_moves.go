@@ -3,12 +3,31 @@ package endpoints
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/AliKefall/prothea/internal/game"
 	"github.com/AliKefall/prothea/internal/utils"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
+
+// In the earlier version of this endpoint I took the data from
+// database.MatchMove struct which is kinda irrelevant with the frontends
+// expectations if send like that it converts the data as pascal case
+// which is not how we work. So this struct here to convert the json data
+// nothing more.
+type MatchMovesResponse struct {
+	ID          int64  `json:"id"`
+	MatchID     string `json:"match_id"`
+	MoveNumber  int    `json:"move_number"`
+	PlayerID    string `json:"player_id"`
+	SAN         string `json:"san"`
+	UCI         string `json:"uci"`
+	FENAfter    string `json:"fen_after"`
+	WhiteTimeMs int64  `json:"white_time_ms"`
+	BlackTimeMs int64  `json:"black_time_ms"`
+	CreatedAt   string `json:"created_at"`
+}
 
 func (deps *Deps) GetMatchMovesHandler(
 	w http.ResponseWriter,
@@ -92,9 +111,27 @@ func (deps *Deps) GetMatchMovesHandler(
 		return
 	}
 
+	response := make([]MatchMovesResponse, 0, len(moves))
+
+	for _, move := range moves {
+		response = append(response, MatchMovesResponse{
+			ID: move.ID,
+			MatchID: matchID.String(),
+			MoveNumber: int(move.MoveNumber),
+			PlayerID: move.PlayerID.String(),
+			SAN: move.San,
+			UCI: move.Uci,
+			FENAfter: move.FenAfter,
+			WhiteTimeMs: move.WhiteTimeMs,
+			BlackTimeMs: move.BlackTimeMs,
+			CreatedAt: move.CreatedAt.Format(time.RFC3339Nano),
+		})
+	}
+
 	utils.RespondWithJSON(
 		w,
 		http.StatusOK,
-		moves,
+		response,
 	)
+
 }
