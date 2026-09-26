@@ -16,6 +16,8 @@ import { ChessWorkspace } from "./chess-workspace";
 import { ChessSidebar } from "./chess-sidebar";
 import type { ChessSidebarTab } from "./chess-sidebar-tabs";
 import { MoveHistory } from "./move-history";
+import MatchmakingPanel from "@/features/matchmaking/components/matchmaking-panel";
+import { useMatchmakingStore } from "@/features/matchmaking/store/matchmaking-store";
 
 const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -108,6 +110,7 @@ function formatClock(timeMs: number): string {
 export function ChessBoard({ matchId }: ChessBoardProps) {
   const user = useAuthStore((state) => state.user);
   const queryClient = useQueryClient();
+  const resetMatchmaking = useMatchmakingStore((state) => state.reset);
 
   const {
     data: match,
@@ -129,6 +132,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
   const [drawOfferReceived, setDrawOfferReceived] = useState(false);
   // FIX #2: typed state so it matches ChessSidebar's `ChessSidebarTab` prop
   const [activeTab, setActiveTab] = useState<ChessSidebarTab>("moves");
+  const [selectedMoveNumber, setSelectedMoveNumber] = useState<number | null>(null);
 
   const moves = useMemo<GameMove[]>(() => {
     const merged = new Map<number, GameMove>();
@@ -169,7 +173,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     );
   }, [movesData, liveMoves]);
 
-  const position = useMemo(() => {
+  const livePosition = useMemo(() => {
     if (moves.length === 0) {
       return STARTING_FEN;
     }
@@ -177,9 +181,18 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     return moves[moves.length - 1].fen_after;
   }, [moves]);
 
+  const selectedMove = useMemo(
+    () => moves.find((move) => move.move_number === selectedMoveNumber),
+    [moves, selectedMoveNumber],
+  );
+
+  const isReviewingMove = selectedMove !== undefined;
+
+  const position = selectedMove?.fen_after ?? livePosition;
+
   const game = useMemo(() => {
-    return new Chess(position);
-  }, [position]);
+    return new Chess(livePosition);
+  }, [livePosition]);
 
   const initialTimeMs = useMemo(() => {
     return parseInitialTimeMs(match?.time_control);
@@ -248,6 +261,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
         setDrawOfferReceived(false);
         setClockNow(Date.now());
         setActiveTab("matchmaking"); // After player finishes his game matchmaking tab opens as default
+        resetMatchmaking();
 
         queryClient.setQueryData(
           ["match", matchId],
@@ -362,7 +376,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     const unsubscribe = websocketManager.subscribe(handleMessage);
 
     return unsubscribe;
-  }, [matchId, queryClient]);
+  }, [matchId, queryClient, resetMatchmaking]);
 
   const elapsedMs =
     baseClock.lastMoveAt === null
@@ -429,6 +443,11 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     }
 
     if (gameFinished || currentMatch.result !== "pending") {
+      return false;
+    }
+
+    // A historical board position is read-only; moves can only be made from live play.
+    if (isReviewingMove) {
       return false;
     }
 
@@ -515,7 +534,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                     position,
                     boardOrientation: isWhite ? "white" : "black",
                     allowDragging:
-                      !gameFinished && currentMatch.result === "pending",
+                      !gameFinished && currentMatch.result === "pending" && !isReviewingMove,
                     onPieceDrop: handlePieceDrop,
                   }}
                 />
@@ -660,7 +679,12 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
               }
             >
               {activeTab === "moves" && (
-                <MoveHistory moves={moves} isLoading={isMovesLoading} />
+                <MoveHistory
+                  moves={moves}
+                  isLoading={isMovesLoading}
+                  selectedMoveNumber={isReviewingMove ? selectedMoveNumber : null}
+                  onMoveSelect={setSelectedMoveNumber}
+                />
               )}
 
               {activeTab === "chat" && (
@@ -676,29 +700,31 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
               )}
 
               {activeTab === "replay" && (
-                <div className="flex h-full items-center justify-center p-6">
-                  <div className="text-center">
-                    <p className="text-sm font-medium text-zinc-300">Replay</p>
-
-                    <p className="mt-1 text-xs text-zinc-600">
-                      Replay controls will be added here.
-                    </p>
+                <div className="p-6">
+                  <p className="text-sm font-medium text-zinc-300">Replay</p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Select a move to inspect that position. The board remains read-only while reviewing history.
+                  </p>
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      type="button"
+                      disabled={!isReviewingMove}
+                      onClick={() => setSelectedMoveNumber(null)}
+                      className="rounded-lg border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-300 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Return to live position
+                    </button>
                   </div>
+                  {selectedMove && (
+                    <p className="mt-4 text-sm text-zinc-300">
+                      Viewing move {Math.ceil(selectedMove.move_number / 2)}: {selectedMove.san}
+                    </p>
+                  )}
                 </div>
               )}
 
               {activeTab === "matchmaking" && (
-                <div className="flex h-full items-center justify-center p-6">
-                  <div className="text-center">
-                    <p className="text-sm font-medium text-zinc-300">
-                      Find another game
-                    </p>
-
-                    <p className="mt-1 text-xs text-zinc-600">
-                      Matchmaking will be added here.
-                    </p>
-                  </div>
-                </div>
+                <MatchmakingPanel embedded />
               )}
             </ChessSidebar>
           }

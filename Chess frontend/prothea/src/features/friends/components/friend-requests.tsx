@@ -7,22 +7,21 @@ import { Button } from "@/components/ui/button";
 import { useAcceptFriendRequest } from "../hooks/use-accept-friend-request";
 import { useRejectFriendRequest } from "../hooks/use-reject-friend-request";
 
-import { useIncomingRequests } from "../store/selectors";
+import { useIncomingRequests, useOutgoingRequests } from "../store/selectors";
 
 import { FriendCard } from "./friend-card";
 
 export function FriendRequests() {
   const requests = useIncomingRequests();
-
+  const outgoingRequests = useOutgoingRequests();
   const acceptMutation = useAcceptFriendRequest();
   const rejectMutation = useRejectFriendRequest();
 
-  if (requests.length === 0) {
+  if (requests.length === 0 && outgoingRequests.length === 0) {
     return null;
   }
 
-  const isProcessing =
-    acceptMutation.isPending || rejectMutation.isPending;
+  const isProcessing = acceptMutation.isPending || rejectMutation.isPending;
 
   return (
     <section className="space-y-3">
@@ -94,7 +93,6 @@ export function FriendRequests() {
                     "
                   >
                     <CheckIcon className="mr-1.5 h-4 w-4" />
-
                     Accept
                   </Button>
 
@@ -122,7 +120,6 @@ export function FriendRequests() {
                     "
                   >
                     <XMarkIcon className="mr-1.5 h-4 w-4" />
-
                     Reject
                   </Button>
                 </div>
@@ -131,6 +128,22 @@ export function FriendRequests() {
           );
         })}
       </div>
+
+      {outgoingRequests.length > 0 && (
+        <div className="space-y-2 border-t border-zinc-800 pt-4">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-200">Sent requests</h3>
+            <p className="mt-1 text-xs text-zinc-500">Waiting for these players to respond.</p>
+          </div>
+          {outgoingRequests.map((request) => (
+            <FriendCard
+              key={request.id}
+              friend={{ id: request.id, username: request.username, online: false, inGame: false }}
+              rightSlot={<span className="text-xs text-zinc-500">Pending</span>}
+            />
+          ))}
+        </div>
+      )}
     </section>
   );
 }

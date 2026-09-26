@@ -17,7 +17,13 @@ const timeControls = {
   Rapid: ["10+0", "10+5", "15+10", "30+0", "30+20"],
 };
 
-export default function MatchmakingPanel() {
+interface MatchmakingPanelProps {
+  embedded?: boolean;
+}
+
+export default function MatchmakingPanel({
+  embedded = false,
+}: MatchmakingPanelProps) {
   const router = useRouter();
 
   useMatchmakingWebSocket();
@@ -26,18 +32,24 @@ export default function MatchmakingPanel() {
   const timeControl = useMatchmakingStore((state) => state.timeControl);
   const error = useMatchmakingStore((state) => state.error);
   const match = useMatchmakingStore((state) => state.match);
+  const reset = useMatchmakingStore((state) => state.reset);
 
   const [selectedTimeControl, setSelectedTimeControl] = useState("10+0");
 
   const isSearching = status === "searching";
   const isMatched = status === "matched";
 
+  // Matchmaking state is global. Clear a completed match before showing a new queue.
+  useEffect(() => {
+    reset();
+  }, [reset]);
+
   useEffect(() => {
     if (!isMatched || !match) {
       return;
     }
 
-    router.replace(`/dashboard/chess/${match.id}`)
+    router.replace(`/dashboard/chess/${match.id}`);
   }, [isMatched, match, router]);
 
   async function handleFindGame() {
@@ -49,11 +61,18 @@ export default function MatchmakingPanel() {
   }
 
   return (
-    <main className="min-h-screen bg-zinc-950 px-6 py-12 text-white">
+    <main
+      className={
+        embedded
+          ? "bg-zinc-900 p-5 text-white"
+          : "min-h-screen bg-zinc-950 px-6 py-12 text-white"
+      }
+    >
       <div className="mx-auto w-full max-w-2xl">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold">Find a game</h1>
-
+        <div className={embedded ? "mb-5" : "mb-8"}>
+          <h1 className={embedded ? "text-lg font-bold" : "text-3xl font-bold"}>
+            Find a game
+          </h1>
           <p className="mt-2 text-sm text-zinc-400">
             Choose a time control and find an opponent.
           </p>

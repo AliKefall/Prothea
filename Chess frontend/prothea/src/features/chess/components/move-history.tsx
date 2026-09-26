@@ -6,11 +6,15 @@ interface MoveHistoryMove {
 interface MoveHistoryProps {
   moves: MoveHistoryMove[];
   isLoading: boolean;
+  selectedMoveNumber: number | null;
+  onMoveSelect: (moveNumber: number) => void;
 }
 
 export function MoveHistory({
   moves,
   isLoading,
+  selectedMoveNumber,
+  onMoveSelect,
 }: MoveHistoryProps) {
   if (isLoading) {
     return (
@@ -52,27 +56,27 @@ export function MoveHistory({
                 key={index + 1}
                 className="grid grid-cols-[36px_1fr_1fr] border-t border-zinc-800 text-sm"
               >
-                <div className="px-3 py-2 text-zinc-600">
-                  {index + 1}.
-                </div>
-
-                <div
-                  className={[
-                    "px-3 py-2",
-                    whiteMove ? "text-zinc-300" : "text-zinc-700",
-                  ].join(" ")}
-                >
-                  {whiteMove?.san ?? ""}
-                </div>
-
-                <div
-                  className={[
-                    "px-3 py-2",
-                    blackMove ? "text-zinc-300" : "text-zinc-700",
-                  ].join(" ")}
-                >
-                  {blackMove?.san ?? ""}
-                </div>
+                <div className="px-3 py-2 text-zinc-600">{index + 1}.</div>
+{[whiteMove, blackMove].map((move) =>
+                  move ? (
+                    <button
+                      key={move.move_number}
+                      type="button"
+                      onClick={() => onMoveSelect(move.move_number)}
+                      aria-pressed={selectedMoveNumber === move.move_number}
+                      className={[
+                        "px-3 py-2 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-zinc-400",
+                        selectedMoveNumber === move.move_number
+                          ? "bg-zinc-700 text-white"
+                          : "text-zinc-300 hover:bg-zinc-800 hover:text-white",
+                      ].join(" ")}
+                    >
+                      {move.san}
+                    </button>
+                  ) : (
+                    <div key={`empty-${index}`} className="px-3 py-2 text-zinc-700" />
+                  ),
+                )}
               </div>
             );
           },
