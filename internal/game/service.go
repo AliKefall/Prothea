@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"math"
 	"strconv"
 	"strings"
@@ -19,12 +20,13 @@ const StartingFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 var ErrMatchNotFound = errors.New("match not found")
 
 type Service struct {
-	DB            *sql.DB
-	Queries       *database.Queries
-	StateStore    StateStore
-	MoveValidator MoveValidator
-	GameLock      *RedisGameLock
-	EloService    *elo.Service
+	DB              *sql.DB
+	Queries         *database.Queries
+	StateStore      StateStore
+	MoveValidator   MoveValidator
+	GameLock        *RedisGameLock
+	EloService      *elo.Service
+	DisconnectStore DisconnectStore
 }
 
 type GameFinishedEvent struct {
@@ -49,17 +51,19 @@ func NewService(
 	db *sql.DB,
 	queries *database.Queries,
 	stateStore StateStore,
+	disconnectStore DisconnectStore,
 	moveValidator MoveValidator,
 	gameLock *RedisGameLock,
 	eloService *elo.Service,
 ) *Service {
 	return &Service{
-		DB:            db,
-		Queries:       queries,
-		StateStore:    stateStore,
-		MoveValidator: moveValidator,
-		GameLock:      gameLock,
-		EloService:    eloService,
+		DB:              db,
+		Queries:         queries,
+		StateStore:      stateStore,
+		DisconnectStore: disconnectStore,
+		MoveValidator:   moveValidator,
+		GameLock:        gameLock,
+		EloService:      eloService,
 	}
 }
 
@@ -93,7 +97,6 @@ func (s *Service) CreateMatch(
 	if err := s.createInitialState(ctx, match); err != nil {
 		return createdMatch, err
 	}
-
 	return createdMatch, nil
 }
 
@@ -995,7 +998,7 @@ func parseTimeControl(
 	return initialTimeMs, incrementMs, nil
 }
 
-type TimeoutResult struct{
+type TimeoutResult struct {
 	MatchID uuid.UUID
 
 	WhiteID uuid.UUID
@@ -1059,7 +1062,7 @@ func (s *Service) ExpireTimeout(
 
 	switch state.Turn {
 	case ColorWhite:
-		if state.WhiteTimeMs - elapsedMs > 0 {
+		if state.WhiteTimeMs-elapsedMs > 0 {
 			return TimeoutResult{}, ErrGameTimeNotExpired
 		}
 
@@ -1068,7 +1071,7 @@ func (s *Service) ExpireTimeout(
 		result = database.MatchResultBlack
 
 	case ColorBlack:
-		if state.BlackTimeMs - elapsedMs > 0 {
+		if state.BlackTimeMs-elapsedMs > 0 {
 			return TimeoutResult{}, ErrGameTimeNotExpired
 		}
 
@@ -1097,7 +1100,138 @@ func (s *Service) ExpireTimeout(
 		MatchID: matchID,
 		WhiteID: state.WhiteID,
 		BlackID: state.BlackID,
-		Finish: finish,
+		Finish:  finish,
 	}, nil
 
+}
+
+type DisconnectResult struct {
+	MatchID uuid.UUID
+
+	WhiteID uuid.UUID
+	BlackID uuid.UUID
+
+	DisconnectedPlayerID uuid.UUID
+
+	Finish FinishResult
+}
+
+func (s *Service) ExpireDisconnect(
+	ctx context.Context,
+	matchID uuid.UUID,
+	playerID uuid.UUID,
+) (DisconnectResult, error) {
+	if s == nil {
+		return DisconnectResult{}, errors.New(
+			"game service is nil ",
+		)
+	}
+
+	if s.GameLock == nil {
+		return DisconnectResult{}, errors.New(
+			"game lock is not initialized",
+		)
+	}
+
+	if s.StateStore == nil {
+		return DisconnectResult{}, errors.New(
+			"game state store is not initialized",
+		)
+	}
+
+	if s.DisconnectStore == nil {
+		return DisconnectResult{}, errors.New(
+			"disconnect store is not initialized",
+		)
+	}
+
+	release, err := s.GameLock.Acquire(
+		ctx,
+		matchID,
+	)
+
+	if err != nil {
+		return DisconnectResult{}, err
+	}
+	defer release()
+
+	state, err := s.StateStore.Get(
+		ctx,
+		matchID,
+	)
+
+	if err != nil {
+		return DisconnectResult{}, err
+	}
+
+	if !state.IsActive() {
+		_ = s.DisconnectStore.Clear(
+			ctx,
+			matchID,
+			playerID,
+		)
+
+		return DisconnectResult{}, ErrGameNotActive
+	}
+
+	disconnected, err := s.DisconnectStore.IsDisconnected(
+		ctx,
+		matchID,
+		playerID,
+	)
+
+	if err != nil {
+		return DisconnectResult{}, err
+	}
+
+	if !disconnected {
+		return DisconnectResult{}, ErrDisconnectNotFound
+	}
+
+	var result database.MatchResult
+
+	switch playerID {
+	case state.WhiteID:
+		result = database.MatchResultBlack
+
+	case state.BlackID:
+		result = database.MatchResultWhite
+
+	default:
+		return DisconnectResult{}, ErrPlayerNotInMatch
+	}
+
+	finish, err := s.FinishGame(
+		ctx,
+		state,
+		result,
+		"abandonment",
+	)
+	if err != nil {
+		return DisconnectResult{}, err
+	}
+
+	if err := s.DisconnectStore.Clear(
+		ctx,
+		matchID,
+		playerID,
+	); err != nil {
+		slog.Error(
+			"failed to clear disconnect entry after abandonment",
+			"match_id", matchID,
+			"player_id", playerID,
+			"error", err,
+		)
+	}
+
+	return DisconnectResult{
+		MatchID: matchID,
+
+		WhiteID: state.WhiteID,
+		BlackID: state.BlackID,
+
+		DisconnectedPlayerID: playerID,
+
+		Finish: finish,
+	}, nil
 }

@@ -52,15 +52,18 @@ func main() {
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-
+	disconnectStore := game.NewRedisDisconnectStore(
+		deps.redis,
+	)
 	gameTimeOutWorker := &game.Worker{
 		Service: deps.deps.Game,
 		StateStore: game.NewRedisStateStore(
 			deps.redis,
 		),
-		Hub: deps.hub,
+		DisconnectStore: disconnectStore,
+		Hub:          deps.hub,
 		PollInterval: game.DefaultTimeoutPollInterval,
-		BatchSize: game.DefaultTimeoutBatchSize,
+		BatchSize:    game.DefaultTimeoutBatchSize,
 	}
 
 	go gameTimeOutWorker.Run(ctx)

@@ -46,7 +46,7 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 
 	gameStateStore := game.NewRedisStateStore(redisClient)
 	gameLock := game.NewRedisGameLock(redisClient)
-
+	disconnectStore := game.NewRedisDisconnectStore(redisClient)
 	eloRepository := elo.NewRepository(conn, queries)
 
 	eloService := elo.NewService(eloRepository)
@@ -54,9 +54,15 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 		conn,
 		queries,
 		gameStateStore,
+		disconnectStore,
 		game.NewChessValidator(),
 		gameLock,
 		eloService,
+	)
+
+	hub.SetUserLifecycleHandler(
+		gameService.HandleUserConnected,
+		gameService.HandleUserDisconnected,
 	)
 
 	hub.Register(

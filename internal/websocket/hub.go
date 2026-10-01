@@ -26,6 +26,11 @@ type Hub struct {
 	events map[EventType]EventHandler
 
 	active atomic.Int64
+
+	// Careful not to bloat these functions they can be used for online, offline
+	// triggers too.
+	onUserConnected    func(*Client)
+	onUserDisconnected func(*Client)
 }
 
 func NewHub() *Hub {
@@ -57,25 +62,44 @@ func (h *Hub) registerClient(
 	client *Client,
 ) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
+
+	wasOffline := !h.hasUserConnectionLocked(client.UserID)
 
 	h.clients[client] = struct{}{}
 
 	h.active.Add(1)
+
+	handler := h.onUserConnected
+
+	h.mu.Unlock()
+
+	if wasOffline && handler != nil {
+		go handler(client)
+	}
 }
 
 func (h *Hub) unregisterClient(
 	client *Client,
 ) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 
 	if _, ok := h.clients[client]; !ok {
+		h.mu.Unlock()
 		return
 	}
 
 	delete(h.clients, client)
 	h.active.Add(-1)
+
+	stillConnected := h.hasUserConnectionLocked(client.UserID)
+
+	handler := h.onUserDisconnected
+
+	h.mu.Unlock()
+
+	if !stillConnected && handler != nil {
+		go handler(client)
+	}
 }
 
 // If user  have more than one websocket connection this one sends this to every last one of them
@@ -125,4 +149,25 @@ func (h *Hub) SendToUser(
 	}
 
 	return nil
+}
+
+func (h *Hub) SetUserLifecycleHandler(
+	onConnected func(*Client),
+	onDisconnected func(*Client),
+) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.onUserConnected = onConnected
+	h.onUserDisconnected = onDisconnected
+}
+
+func (h *Hub) hasUserConnectionLocked(userID string) bool {
+	for client := range h.clients {
+		if client.UserID == userID {
+			return true
+		}
+	}
+
+	return false
 }

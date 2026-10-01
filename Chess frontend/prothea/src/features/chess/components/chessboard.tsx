@@ -84,6 +84,22 @@ interface ClockSnapshot {
   lastMoveAt: number | null;
 }
 
+interface GamePresencePayload {
+  match_id: string;
+  player_id: string;
+  deadline?: string;
+}
+
+interface WebSocketGameDisconnectedMessage {
+  type: "game_player_disconnected";
+  payload: GamePresencePayload;
+}
+
+interface WebSocketGameReconnectedMessage {
+  type: "game_player_reconnected";
+  payload: GamePresencePayload;
+}
+
 function parseInitialTimeMs(timeControl: string | undefined): number {
   if (!timeControl) {
     return 0;
@@ -112,6 +128,16 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
   const queryClient = useQueryClient();
   const resetMatchmaking = useMatchmakingStore((state) => state.reset);
 
+  const [disconnectDeadline, setDisconnectDeadline] = useState<number | null>(
+    null,
+  );
+
+  const [disconnectedPlayerId, setDisconnectedPlayerId] = useState<
+    string | null
+  >(null);
+
+  const [presenceNow, setPresenceNow] = useState(() => Date.now());
+
   const {
     data: match,
     isLoading: isMatchLoading,
@@ -132,7 +158,9 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
   const [drawOfferReceived, setDrawOfferReceived] = useState(false);
   // FIX #2: typed state so it matches ChessSidebar's `ChessSidebarTab` prop
   const [activeTab, setActiveTab] = useState<ChessSidebarTab>("moves");
-  const [selectedMoveNumber, setSelectedMoveNumber] = useState<number | null>(null);
+  const [selectedMoveNumber, setSelectedMoveNumber] = useState<number | null>(
+    null,
+  );
 
   const moves = useMemo<GameMove[]>(() => {
     const merged = new Map<number, GameMove>();
@@ -237,6 +265,20 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
   }, [match?.result, gameFinished, clockAnchor]);
 
   useEffect(() => {
+    if (disconnectDeadline === null) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setPresenceNow(Date.now());
+    }, 250);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [disconnectDeadline]);
+
+  useEffect(() => {
     function handleMessage(message: unknown) {
       if (
         typeof message !== "object" ||
@@ -257,6 +299,9 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
 
         setGameFinished(true);
         setFinishResult(payload);
+        setDisconnectedPlayerId(null);
+        setDisconnectDeadline(null);
+        setPresenceNow(Date.now());
         setDrawOfferSent(false);
         setDrawOfferReceived(false);
         setClockNow(Date.now());
@@ -308,6 +353,49 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
         }
 
         setDrawOfferSent(false);
+
+        return;
+      }
+
+      if (message.type === "game_player_disconnected") {
+        const wsMessage = message as WebSocketGameDisconnectedMessage;
+
+        const payload = wsMessage.payload;
+
+        if (!payload || payload.match_id !== matchId) {
+          return;
+        }
+
+        const deadline = Date.parse(payload.deadline ?? "");
+
+        if (!Number.isFinite(deadline)) {
+          console.error("received invalid disconnect deadline: ", payload);
+
+          return;
+        }
+
+        setDisconnectedPlayerId(payload.player_id);
+        setDisconnectDeadline(deadline);
+        setPresenceNow(Date.now());
+
+        return;
+      }
+
+      if (message.type === "game_player_reconnected") {
+        const wsMessage = message as WebSocketGameReconnectedMessage;
+
+        const payload = wsMessage.payload;
+
+        if (!payload || payload.match_id !== matchId) {
+          return;
+        }
+
+        setDisconnectedPlayerId((currentPlayerID) =>
+          currentPlayerID === payload.player_id ? null : currentPlayerID,
+        );
+
+        setDisconnectDeadline(null);
+        setPresenceNow(Date.now());
 
         return;
       }
@@ -495,6 +583,19 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     }
   }
 
+  const disconnectRemainingMs =
+    disconnectDeadline === null
+      ? 0
+      : Math.max(0, disconnectDeadline - presenceNow);
+
+  const disconnectRemainingSeconds = Math.ceil(disconnectRemainingMs / 1000);
+
+  const isOpponentDisconnected =
+    disconnectedPlayerId !== null &&
+    disconnectedPlayerId !== currentUser?.user_id;
+  const isCurrentUserDisconnected =
+    disconnectedPlayerId === currentUser?.user_id;
+
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-zinc-950 p-6 text-white">
       <div className="mx-auto flex h-full w-full max-w-6xl items-center justify-center">
@@ -503,6 +604,27 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
           board={
             <div className="flex min-w-0 flex-col items-center">
               <div className="mb-3 flex w-full max-w-130 items-center justify-between">
+                {disconnectDeadline !== null && (
+                  <div className="mb-3 w-full max-w-130 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-zinc-200">
+                          {isOpponentDisconnected
+                            ? `${opponentUsername} disconnected`
+                            : isCurrentUserDisconnected
+                              ? "You are disconnected"
+                              : "Player disconnected"}
+                        </p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          Reconnect before the game is abondoned.
+                        </p>
+                        <span className="font-mono text-lg font-semibold text-white">
+                          {disconnectRemainingSeconds}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-center gap-3">
                   <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-800 text-sm font-bold">
                     {opponentUsername.charAt(0).toUpperCase()}
@@ -534,7 +656,9 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                     position,
                     boardOrientation: isWhite ? "white" : "black",
                     allowDragging:
-                      !gameFinished && currentMatch.result === "pending" && !isReviewingMove,
+                      !gameFinished &&
+                      currentMatch.result === "pending" &&
+                      !isReviewingMove,
                     onPieceDrop: handlePieceDrop,
                   }}
                 />
@@ -574,7 +698,9 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
           sidebar={
             <ChessSidebar
               activeTab={activeTab}
-              showMatchmaking={gameFinished || currentMatch.result !== "pending"}
+              showMatchmaking={
+                gameFinished || currentMatch.result !== "pending"
+              }
               statusLabel={
                 gameFinished
                   ? "Finished"
@@ -682,7 +808,9 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                 <MoveHistory
                   moves={moves}
                   isLoading={isMovesLoading}
-                  selectedMoveNumber={isReviewingMove ? selectedMoveNumber : null}
+                  selectedMoveNumber={
+                    isReviewingMove ? selectedMoveNumber : null
+                  }
                   onMoveSelect={setSelectedMoveNumber}
                 />
               )}
@@ -690,7 +818,9 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
               {activeTab === "chat" && (
                 <div className="flex h-full items-center justify-center p-6">
                   <div className="text-center">
-                    <p className="text-sm font-medium text-zinc-300">Game chat</p>
+                    <p className="text-sm font-medium text-zinc-300">
+                      Game chat
+                    </p>
 
                     <p className="mt-1 text-xs text-zinc-600">
                       Chat will be added here.
@@ -703,7 +833,8 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                 <div className="p-6">
                   <p className="text-sm font-medium text-zinc-300">Replay</p>
                   <p className="mt-1 text-xs text-zinc-500">
-                    Select a move to inspect that position. The board remains read-only while reviewing history.
+                    Select a move to inspect that position. The board remains
+                    read-only while reviewing history.
                   </p>
                   <div className="mt-4 flex gap-2">
                     <button
@@ -717,15 +848,14 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                   </div>
                   {selectedMove && (
                     <p className="mt-4 text-sm text-zinc-300">
-                      Viewing move {Math.ceil(selectedMove.move_number / 2)}: {selectedMove.san}
+                      Viewing move {Math.ceil(selectedMove.move_number / 2)}:{" "}
+                      {selectedMove.san}
                     </p>
                   )}
                 </div>
               )}
 
-              {activeTab === "matchmaking" && (
-                <MatchmakingPanel embedded />
-              )}
+              {activeTab === "matchmaking" && <MatchmakingPanel embedded />}
             </ChessSidebar>
           }
         />

@@ -7,4 +7,6 @@ var (
 	EventGameDrawOffer  EventType = "game_draw_offer"
 	EventGameDrawAccept EventType = "game_draw_accept"
 	EventGameDrawReject EventType = "game_draw_reject"
+	EventGamePlayerDisconnected EventType = "game_player_disconnected"
+	EventGamePlayerReconnected  EventType = "game_player_reconnected"
 )
