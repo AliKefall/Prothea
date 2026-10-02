@@ -18,6 +18,7 @@ import type { ChessSidebarTab } from "./chess-sidebar-tabs";
 import { MoveHistory } from "./move-history";
 import MatchmakingPanel from "@/features/matchmaking/components/matchmaking-panel";
 import { useMatchmakingStore } from "@/features/matchmaking/store/matchmaking-store";
+import { currentUserQueryKey } from "@/features/profile/hooks/use-current-user";
 
 const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -400,6 +401,54 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
         return;
       }
 
+      if (message.type === "game_presence_sync") {
+  const payload = message.payload as {
+    match_id?: string;
+    disconnected_player_id?: string;
+    deadline?: string;
+  };
+
+  if (!payload || payload.match_id !== matchId) {
+    return;
+  }
+
+  if (
+    !payload.disconnected_player_id ||
+    !payload.deadline
+  ) {
+    setDisconnectedPlayerId(null);
+    setDisconnectDeadline(null);
+    setPresenceNow(Date.now());
+
+    return;
+  }
+
+  const deadline = Date.parse(
+    payload.deadline,
+  );
+
+  if (!Number.isFinite(deadline)) {
+    console.error(
+      "Received invalid presence sync deadline:",
+      payload,
+    );
+
+    return;
+  }
+
+  setDisconnectedPlayerId(
+    payload.disconnected_player_id,
+  );
+
+  setDisconnectDeadline(
+    deadline,
+  );
+
+  setPresenceNow(Date.now());
+
+  return;
+}
+
       if (message.type !== "game_move") {
         return;
       }
@@ -465,6 +514,49 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
 
     return unsubscribe;
   }, [matchId, queryClient, resetMatchmaking]);
+
+  useEffect(() => {
+    const refreshGameState = () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["match", matchId],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["match", matchId, "moves"],
+      });
+    };
+
+    const unsubscribe = websocketManager.subscribeConnection(refreshGameState);
+
+    if (websocketManager.isConnected()) {
+      refreshGameState;
+    }
+
+    return unsubscribe;
+  }, [matchId, queryClient]);
+
+  useEffect(() => {
+    const syncPresence = () => {
+      if (!websocketManager.isConnected()) {
+        return;
+      }
+
+      try {
+        websocketManager.send("game_presence_sync_request", {
+          match_id: matchId,
+        });
+      } catch (error) {
+        console.error("Failed to request game presence sync:", error);
+      }
+    };
+
+    const unsubscribe = websocketManager.subscribeConnection(syncPresence);
+
+    if (websocketManager.isConnected()) {
+      syncPresence();
+    }
+
+    return unsubscribe;
+  }, [matchId]);
 
   const elapsedMs =
     baseClock.lastMoveAt === null

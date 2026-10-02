@@ -90,6 +90,11 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 		gameService.HandleDrawAccept,
 	)
 
+	hub.Register(
+		websocket.EventGamePresenceSyncRequest,
+		gameService.HandlePresenceSync,
+	)
+
 	deps := &endpoints.Deps{
 		DB:          conn,
 		Queries:     queries,

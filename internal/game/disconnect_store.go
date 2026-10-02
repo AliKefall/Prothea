@@ -55,6 +55,12 @@ type DisconnectStore interface {
 		now time.Time,
 		limit int,
 	) ([]DisconnectEntry, error)
+
+	GetDeadline(
+		ctx context.Context,
+		matchID uuid.UUID,
+		playerID uuid.UUID,
+	) (time.Time, error)
 }
 
 type RedisDisconnectStore struct {
@@ -139,21 +145,18 @@ func (s *RedisDisconnectStore) IsDisconnected(
 	matchID uuid.UUID,
 	playerID uuid.UUID,
 ) (bool, error) {
-	if s == nil || s.client == nil {
-		return false, errors.New("redis client is nil")
+	_, err := s.GetDeadline(
+		ctx,
+		matchID,
+		playerID,
+	)
+
+	if errors.Is(err, ErrDisconnectNotFound) {
+		return false, nil
 	}
 
-	_, err := s.client.ZScore(
-		ctx,
-		gameDisconnectKey,
-		disconnectMember(
-			matchID,
-			playerID,
-		),
-	).Result()
-
-	if errors.Is(err, redis.Nil) {
-		return false, nil
+	if err != nil {
+		return false, err
 	}
 
 	return true, nil
@@ -228,3 +231,33 @@ func (s *RedisDisconnectStore) Expired(
 
 	return result, nil
 }
+
+func (s *RedisDisconnectStore) GetDeadline(
+	ctx context.Context,
+	matchID uuid.UUID,
+	playerID uuid.UUID,
+) (time.Time, error) {
+	if s == nil || s.client == nil {
+		return time.Time{}, errors.New(
+			"redis client is nil",
+		)
+	}
+
+	score, err := s.client.ZScore(
+		ctx,
+		gameDisconnectKey,
+		disconnectMember(matchID, playerID),
+	).Result()
+
+	if errors.Is(err, redis.Nil) {
+		return time.Time{},	ErrDisconnectNotFound
+	}
+
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	return time.UnixMilli(int64(score)).UTC(), nil
+}
+
+

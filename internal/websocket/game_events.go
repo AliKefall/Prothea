@@ -9,4 +9,6 @@ var (
 	EventGameDrawReject EventType = "game_draw_reject"
 	EventGamePlayerDisconnected EventType = "game_player_disconnected"
 	EventGamePlayerReconnected  EventType = "game_player_reconnected"
+	EventGamePresenceSyncRequest EventType = "game_presence_sync_request"
+EventGamePresenceSync        EventType = "game_presence_sync"
 )
