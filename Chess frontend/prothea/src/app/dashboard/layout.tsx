@@ -13,7 +13,7 @@ export default function DashboardLayout({
     <main className="min-h-screen bg-zinc-950">
       <DashboardSidebar />
 
-      <div className="min-h-screen pl-64">
+      <div className="min-h-screen pl-0 pt-16 md:pl-64 md:pt-0">
         <div className="mx-auto max-w-7xl p-6">
           {children}
         </div>

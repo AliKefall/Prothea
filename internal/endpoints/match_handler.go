@@ -14,13 +14,15 @@ import (
 type MatchResponse struct {
 	ID string `json:"id"`
 
-	WhiteID       string `json:"white_id"`
-	WhiteUsername string `json:"white_username"`
-	WhiteRating   int32  `json:"white_rating"`
+	WhiteID          string `json:"white_id"`
+	WhiteUsername    string `json:"white_username"`
+	WhiteRating      int32  `json:"white_rating"`
+	WhiteRatingAfter *int32 `json:"white_rating_after"`
 
-	BlackID       string `json:"black_id"`
-	BlackUsername string `json:"black_username"`
-	BlackRating   int32  `json:"black_rating"`
+	BlackID          string `json:"black_id"`
+	BlackUsername    string `json:"black_username"`
+	BlackRating      int32  `json:"black_rating"`
+	BlackRatingAfter *int32 `json:"black_rating_after"`
 
 	TimeControl string `json:"time_control"`
 
@@ -111,6 +113,12 @@ func (deps *Deps) GetMatchHandler(
 		Result: string(match.Result),
 
 		CreatedAt: match.CreatedAt.Format(time.RFC3339),
+	}
+	if match.WhiteRatingAfter.Valid {
+		response.WhiteRatingAfter = &match.WhiteRatingAfter.Int32
+	}
+	if match.BlackRatingAfter.Valid {
+		response.BlackRatingAfter = &match.BlackRatingAfter.Int32
 	}
 
 	if match.FinishedAt.Valid {

@@ -1,6 +1,9 @@
 "use client";
 
+import Link from "next/link";
+
 interface GameResultProps {
+  matchId: string;
   result: "white" | "black" | "draw" | "abandoned";
   reason: string;
 
@@ -49,6 +52,7 @@ function formatReason(reason: string): string {
 }
 
 export function GameResult({
+  matchId,
   result,
   reason,
   isWhite,
@@ -144,6 +148,12 @@ export function GameResult({
           </div>
         </div>
       </div>
+      <Link
+        href={`/dashboard/analysis/${matchId}`}
+        className="mt-5 block rounded-lg bg-white px-4 py-3 text-center text-sm font-semibold text-zinc-950 transition hover:bg-zinc-200"
+      >
+        Analyze game
+      </Link>
     </div>
   );
 }

@@ -61,12 +61,7 @@ func (v *ChessValidator) Validate(
 
 	lastMove := moves[len(moves)-1]
 
-	/*
-	 * Move.String() SAN değildir.
-	 *
-	 * AlgebraicNotation.Encode(), hamleyi
-	 * Standard Algebraic Notation'a çevirir.
-	 */
+
 	san := chess.AlgebraicNotation{}.Encode(
 		previousPosition,
 		lastMove,
@@ -76,5 +71,7 @@ func (v *ChessValidator) Validate(
 		SAN:      san,
 		UCI:      uci,
 		FENAfter: game.FEN(),
+		Outcome:  string(game.Outcome()),
+		Reason:   game.Method().String(),
 	}, nil
 }

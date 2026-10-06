@@ -115,8 +115,7 @@ INNER JOIN users AS black_user
 WHERE
     (m.white_id = $1 OR m.black_id = $1)
     AND m.result <> 'pending'
-ORDER BY m.finished_at DESC
-LIMIT $2;
+ORDER BY m.finished_at DESC;
 
 -- name: GetMatchState :one
 SELECT
@@ -168,10 +167,12 @@ SELECT
     m.white_id,
     white_user.username AS white_username,
     m.white_rating_before,
+    m.white_rating_after,
 
     m.black_id,
     black_user.username AS black_username,
     m.black_rating_before,
+    m.black_rating_after,
 
     m.time_control,
     m.result,

@@ -4,7 +4,7 @@ import { createDirectConversation, getConversationMessages, getConversations } f
 
 import { CHAT_EVENT } from "../events/events";
 
-import { ChatErrorPayload, SendMessagePayload } from "./types";
+import { SendMessagePayload } from "./types";
 
 import { useChatStore } from "./chat-store";
 

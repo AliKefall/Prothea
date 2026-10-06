@@ -18,4 +18,6 @@ type ValidatedMove struct {
 	SAN      string
 	UCI      string
 	FENAfter string
+	Outcome  string
+	Reason   string
 }

@@ -16,11 +16,11 @@ import { ChessWorkspace } from "./chess-workspace";
 import { ChessSidebar } from "./chess-sidebar";
 import type { ChessSidebarTab } from "./chess-sidebar-tabs";
 import { MoveHistory } from "./move-history";
+import { PromotionPicker } from "./promotion-picker";
 import MatchmakingPanel from "@/features/matchmaking/components/matchmaking-panel";
 import { useMatchmakingStore } from "@/features/matchmaking/store/matchmaking-store";
-import { currentUserQueryKey } from "@/features/profile/hooks/use-current-user";
+import { INITIAL_FEN } from "@/features/analysis/lib/position";
 
-const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 // NOTE: Tidy up this place.
 interface ChessBoardProps {
@@ -159,6 +159,11 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
   const [drawOfferReceived, setDrawOfferReceived] = useState(false);
   // FIX #2: typed state so it matches ChessSidebar's `ChessSidebarTab` prop
   const [activeTab, setActiveTab] = useState<ChessSidebarTab>("moves");
+  const [promotionRequest, setPromotionRequest] = useState<{
+    from: string;
+    to: string;
+    color: "w" | "b";
+  } | null>(null);
   const [selectedMoveNumber, setSelectedMoveNumber] = useState<number | null>(
     null,
   );
@@ -204,7 +209,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
 
   const livePosition = useMemo(() => {
     if (moves.length === 0) {
-      return STARTING_FEN;
+      return INITIAL_FEN;
     }
 
     return moves[moves.length - 1].fen_after;
@@ -306,8 +311,11 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
         setDrawOfferSent(false);
         setDrawOfferReceived(false);
         setClockNow(Date.now());
-        setActiveTab("matchmaking"); // After player finishes his game matchmaking tab opens as default
+        setActiveTab("moves");
         resetMatchmaking();
+        void queryClient.invalidateQueries({
+          queryKey: ["match", matchId, "moves"],
+        });
 
         queryClient.setQueryData(
           ["match", matchId],
@@ -528,7 +536,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     const unsubscribe = websocketManager.subscribeConnection(refreshGameState);
 
     if (websocketManager.isConnected()) {
-      refreshGameState;
+      refreshGameState();
     }
 
     return unsubscribe;
@@ -614,6 +622,34 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     ? currentMatch.black_rating
     : currentMatch.white_rating;
 
+  function submitGameMove(
+    sourceSquare: string,
+    targetSquare: string,
+    promotion?: "q" | "r" | "b" | "n",
+  ): boolean {
+    try {
+      const nextGame = new Chess(game.fen());
+      const move = nextGame.move({
+        from: sourceSquare,
+        to: targetSquare,
+        ...(promotion ? { promotion } : {}),
+      });
+      if (!move) return false;
+
+      websocketManager.send("game_move", {
+        match_id: matchId,
+        from: sourceSquare,
+        to: targetSquare,
+        promotion: move.promotion ?? "",
+        uci: `${move.from}${move.to}${move.promotion ?? ""}`,
+      });
+      return true;
+    } catch (error) {
+      console.error("Failed to create chess move:", error);
+      return false;
+    }
+  }
+
   function handlePieceDrop({
     sourceSquare,
     targetSquare,
@@ -645,34 +681,21 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
       return false;
     }
 
-    try {
-      const nextGame = new Chess(game.fen());
-
-      const move = nextGame.move({
+    const promotionMove = game.moves({ verbose: true }).find(
+      (move) => move.from === sourceSquare &&
+        move.to === targetSquare &&
+        move.promotion,
+    );
+    if (promotionMove) {
+      setPromotionRequest({
         from: sourceSquare,
         to: targetSquare,
-        promotion: "q",
+        color: piece.color,
       });
-
-      if (!move) {
-        return false;
-      }
-
-      const uci = `${sourceSquare}${targetSquare}` + `${move.promotion ?? ""}`;
-
-      websocketManager.send("game_move", {
-        match_id: matchId,
-        from: sourceSquare,
-        to: targetSquare,
-        promotion: move.promotion ?? "",
-        uci,
-      });
-
-      return true;
-    } catch (error) {
-      console.error("Failed to create chess move:", error);
       return false;
     }
+
+    return submitGameMove(sourceSquare, targetSquare);
   }
 
   const disconnectRemainingMs =
@@ -742,18 +765,30 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                 </div>
               </div>
 
-              <div className="w-full max-w-130 overflow-hidden rounded-lg shadow-2xl">
+              <div className="relative w-full max-w-130 overflow-hidden rounded-lg shadow-2xl">
                 <Chessboard
                   options={{
                     position,
                     boardOrientation: isWhite ? "white" : "black",
                     allowDragging:
+                      !promotionRequest &&
                       !gameFinished &&
                       currentMatch.result === "pending" &&
                       !isReviewingMove,
                     onPieceDrop: handlePieceDrop,
                   }}
                 />
+                {promotionRequest && (
+                  <PromotionPicker
+                    color={promotionRequest.color}
+                    onCancelAction={() => setPromotionRequest(null)}
+                    onSelectAction={(promotion) => {
+                      if (submitGameMove(promotionRequest.from, promotionRequest.to, promotion)) {
+                        setPromotionRequest(null);
+                      }
+                    }}
+                  />
+                )}
               </div>
 
               <div className="mt-3 flex w-full max-w-130 items-center justify-between">
@@ -846,8 +881,9 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                     </div>
                   )}
 
-                  {gameFinished && finishResult && (
+                  {gameFinished && finishResult && activeTab !== "matchmaking" && (
                     <GameResult
+                      matchId={matchId}
                       result={finishResult.result}
                       reason={finishResult.reason}
                       isWhite={isWhite}
@@ -948,6 +984,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
               )}
 
               {activeTab === "matchmaking" && <MatchmakingPanel embedded />}
+
             </ChessSidebar>
           }
         />

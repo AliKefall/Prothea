@@ -1,11 +1,11 @@
 "use client";
 
 import { SyntheticEvent, useEffect, useState } from "react";
-import { ChevronDownIcon, ChevronUpIcon } from "@heroicons/react/24/outline";
+import { ChevronDownIcon, ChevronUpIcon, XMarkIcon } from "@heroicons/react/24/outline";
 
 import { useAuthStore } from "@/features/auth/auth-store";
 
-import { loadConversations, sendMessage } from "../store/actions";
+import { loadConversations, selectConversation, sendMessage } from "../store/actions";
 
 import { useChatError, useSelectedConversation } from "../store/selectors";
 
@@ -13,9 +13,11 @@ import { useConversationMessages } from "../hooks/use-messages";
 import { useChatWebSocket } from "../store/use-chat-websocket";
 
 import { MessageBubble } from "./message-bubble";
+import { useFriendsList } from "@/features/friends/store/selectors";
 
 export function ChatPanel() {
   const user = useAuthStore((state) => state.user);
+  const friends = useFriendsList();
 
   const selectedConversation = useSelectedConversation();
   const error = useChatError();
@@ -25,6 +27,9 @@ export function ChatPanel() {
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
   const [minimized, setMinimized] = useState(false);
+  const conversationUsername = friends.find((friend) => friend.id === selectedConversation?.recipient_id)?.username
+    ?? selectedConversation?.recipient_id
+    ?? "Chat";
 
   useChatWebSocket();
 
@@ -73,14 +78,14 @@ export function ChatPanel() {
   return (
     <div
       className={[
-        "fixed bottom-0 left-15 z-50 flex w-80 flex-col",
-        "overflow-hidden rounded-t-xl border bg-background shadow-2xl",
+        "fixed bottom-4 left-4 z-[60] flex w-[min(20rem,calc(100vw-2rem))] flex-col md:left-[17rem]",
+        "overflow-hidden rounded-xl border bg-background shadow-2xl",
       ].join(" ")}
     >
       {/* Header */}
       <header className="flex h-12 shrink-0 items-center justify-between border-b px-4">
         <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold"></h2>
+          <h2 className="truncate text-sm font-semibold">@{conversationUsername}</h2>
         </div>
 
         <div className="flex items-center gap-2">
@@ -97,6 +102,14 @@ export function ChatPanel() {
             ) : (
               <ChevronDownIcon className="h-4 w-4" />
             )}
+          </button>
+          <button
+            type="button"
+            onClick={() => selectConversation(null)}
+            aria-label="Close chat"
+            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <XMarkIcon className="h-4 w-4" />
           </button>
         </div>
       </header>

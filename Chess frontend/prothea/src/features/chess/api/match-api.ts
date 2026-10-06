@@ -8,10 +8,12 @@ export interface Match {
   white_id: string;
   white_username: string;
   white_rating: number;
+  white_rating_after: number | null;
 
   black_id: string;
   black_username: string;
   black_rating: number;
+  black_rating_after: number | null;
 
   time_control: string;
 

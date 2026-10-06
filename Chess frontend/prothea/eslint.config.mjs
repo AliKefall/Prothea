@@ -12,6 +12,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "public/stockfish/stockfish-19-lite-single.js",
   ]),
 ]);
 

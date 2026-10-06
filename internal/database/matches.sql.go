@@ -220,10 +220,12 @@ SELECT
     m.white_id,
     white_user.username AS white_username,
     m.white_rating_before,
+    m.white_rating_after,
 
     m.black_id,
     black_user.username AS black_username,
     m.black_rating_before,
+    m.black_rating_after,
 
     m.time_control,
     m.result,
@@ -252,9 +254,11 @@ type GetMatchDetailsForPlayerRow struct {
 	WhiteID           uuid.UUID
 	WhiteUsername     string
 	WhiteRatingBefore int32
+	WhiteRatingAfter  sql.NullInt32
 	BlackID           uuid.UUID
 	BlackUsername     string
 	BlackRatingBefore int32
+	BlackRatingAfter  sql.NullInt32
 	TimeControl       string
 	Result            MatchResult
 	CreatedAt         time.Time
@@ -269,9 +273,11 @@ func (q *Queries) GetMatchDetailsForPlayer(ctx context.Context, arg GetMatchDeta
 		&i.WhiteID,
 		&i.WhiteUsername,
 		&i.WhiteRatingBefore,
+		&i.WhiteRatingAfter,
 		&i.BlackID,
 		&i.BlackUsername,
 		&i.BlackRatingBefore,
+		&i.BlackRatingAfter,
 		&i.TimeControl,
 		&i.Result,
 		&i.CreatedAt,
@@ -406,13 +412,7 @@ WHERE
     (m.white_id = $1 OR m.black_id = $1)
     AND m.result <> 'pending'
 ORDER BY m.finished_at DESC
-LIMIT $2
 `
-
-type GetPlayerRecentMatchesParams struct {
-	WhiteID uuid.UUID
-	Limit   int32
-}
 
 type GetPlayerRecentMatchesRow struct {
 	ID                uuid.UUID
@@ -430,8 +430,8 @@ type GetPlayerRecentMatchesRow struct {
 	FinishedAt        sql.NullTime
 }
 
-func (q *Queries) GetPlayerRecentMatches(ctx context.Context, arg GetPlayerRecentMatchesParams) ([]GetPlayerRecentMatchesRow, error) {
-	rows, err := q.db.QueryContext(ctx, getPlayerRecentMatches, arg.WhiteID, arg.Limit)
+func (q *Queries) GetPlayerRecentMatches(ctx context.Context, whiteID uuid.UUID) ([]GetPlayerRecentMatchesRow, error) {
+	rows, err := q.db.QueryContext(ctx, getPlayerRecentMatches, whiteID)
 	if err != nil {
 		return nil, err
 	}

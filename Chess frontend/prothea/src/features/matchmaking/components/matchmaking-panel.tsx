@@ -32,17 +32,13 @@ export default function MatchmakingPanel({
   const timeControl = useMatchmakingStore((state) => state.timeControl);
   const error = useMatchmakingStore((state) => state.error);
   const match = useMatchmakingStore((state) => state.match);
-  const reset = useMatchmakingStore((state) => state.reset);
 
-  const [selectedTimeControl, setSelectedTimeControl] = useState("10+0");
+  const [selectedTimeControl, setSelectedTimeControl] = useState(
+    () => timeControl ?? Object.values(timeControls)[0][0],
+  );
 
   const isSearching = status === "searching";
   const isMatched = status === "matched";
-
-  // Matchmaking state is global. Clear a completed match before showing a new queue.
-  useEffect(() => {
-    reset();
-  }, [reset]);
 
   useEffect(() => {
     if (!isMatched || !match) {
@@ -63,12 +59,12 @@ export default function MatchmakingPanel({
   return (
     <main
       className={
-        embedded
-          ? "bg-zinc-900 p-5 text-white"
+      embedded
+          ? "h-full overflow-y-auto bg-zinc-900 p-4 text-white"
           : "min-h-screen bg-zinc-950 px-6 py-12 text-white"
       }
     >
-      <div className="mx-auto w-full max-w-2xl">
+      <div className={embedded ? "w-full" : "mx-auto w-full max-w-2xl"}>
         <div className={embedded ? "mb-5" : "mb-8"}>
           <h1 className={embedded ? "text-lg font-bold" : "text-3xl font-bold"}>
             Find a game
@@ -80,14 +76,14 @@ export default function MatchmakingPanel({
 
         {/* Time Controls */}
         {!isMatched && (
-          <div className="space-y-6">
+          <div className={embedded ? "space-y-3" : "space-y-6"}>
             {Object.entries(timeControls).map(([category, controls]) => (
               <section key={category}>
-                <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-400">
+                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">
                   {category}
                 </h2>
 
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <div className={embedded ? "grid grid-cols-3 gap-2" : "grid grid-cols-2 gap-3 sm:grid-cols-3"}>
                   {controls.map((control) => {
                     const selected = selectedTimeControl === control;
 
@@ -98,7 +94,7 @@ export default function MatchmakingPanel({
                         disabled={isSearching}
                         onClick={() => setSelectedTimeControl(control)}
                         className={[
-                          "rounded-lg border px-4 py-4 text-left transition",
+                          embedded ? "rounded-lg border px-2 py-2 text-left transition" : "rounded-lg border px-4 py-4 text-left transition",
                           selected
                             ? "border-white bg-white text-black"
                             : "border-zinc-800 bg-zinc-900 text-white hover:border-zinc-600",
@@ -107,7 +103,7 @@ export default function MatchmakingPanel({
                           .filter(Boolean)
                           .join(" ")}
                       >
-                        <div className="text-lg font-semibold">{control}</div>
+                        <div className={embedded ? "text-sm font-semibold" : "text-lg font-semibold"}>{control}</div>
 
                         <div
                           className={[
@@ -156,7 +152,7 @@ export default function MatchmakingPanel({
           <button
             type="button"
             onClick={() => void handleFindGame()}
-            className="mt-8 w-full rounded-lg bg-white px-4 py-4 text-sm font-bold text-black transition hover:bg-zinc-200"
+            className={(embedded ? "mt-4" : "mt-8") + " w-full rounded-lg bg-white px-4 py-3 text-sm font-bold text-black transition hover:bg-zinc-200"}
           >
             Find Game
           </button>

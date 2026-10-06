@@ -25,7 +25,7 @@ class WebSocketManager {
     this.connectionListeners.add(listener);
 
     return () => {
-      this.connectionListeners;
+      this.connectionListeners.delete(listener);
     };
   }
 

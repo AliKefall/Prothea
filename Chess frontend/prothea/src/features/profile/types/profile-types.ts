@@ -23,6 +23,7 @@ export interface RecentMatch {
   opponent: RecentMatchOpponent;
   result: RecentMatchResult;
   time_control: string;
+  rating_type: RatingType;
   rating_before: number;
   rating_after: number;
   played_at: string;
@@ -31,7 +32,6 @@ export interface RecentMatch {
 export interface CurrentUserProfile {
   user_id: string;
   username: string;
-  email: string;
   ratings: PlayerRatings;
   recent_matches: RecentMatch[];
 }

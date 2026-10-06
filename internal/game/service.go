@@ -524,6 +524,7 @@ func (s *Service) ApplyMove(
 				},
 			}, nil
 		}
+		return MoveResult{}, err
 	}
 
 	// Get the latest move number so the new move can be stored
@@ -567,6 +568,29 @@ func (s *Service) ApplyMove(
 		return MoveResult{}, err
 	}
 
+	var finishResult *FinishResult
+	var matchResult database.MatchResult
+	switch validatedMove.Outcome {
+	case "1-0":
+		matchResult = database.MatchResultWhite
+	case "0-1":
+		matchResult = database.MatchResultBlack
+	case "1/2-1/2":
+		matchResult = database.MatchResultDraw
+	}
+	if matchResult != "" {
+		finished, err := s.FinishGame(
+			ctx,
+			state,
+			matchResult,
+			validatedMove.Reason,
+		)
+		if err != nil {
+			return MoveResult{}, err
+		}
+		finishResult = &finished
+	}
+
 	// Return the authoritative result that will be broadcast
 	// to both players through the WebSocket layer.
 	return MoveResult{
@@ -590,6 +614,7 @@ func (s *Service) ApplyMove(
 		WhiteTimeMs: state.WhiteTimeMs,
 		BlackTimeMs: state.BlackTimeMs,
 		LastMoveAt:  state.LastMoveAt,
+		Finish:      finishResult,
 	}, nil
 }
 

@@ -98,75 +98,8 @@ func (s *Service) HandleMove(
 		return errors.New("websocket hub is nil")
 	}
 
-	/*
-	 * A move can also finish the game.
-	 * In that case the server must publish a final result instead
-	 * of broadcasting an incomplete game_move event.
-	 */
-	if result.Finish != nil {
-		finish := result.Finish
-
-		finishedPayload := GameFinishedEvent{
-			MatchID: result.MatchID.String(),
-
-			Result:   string(finish.Result),
-			WinnerID: finish.WinnerID.String(),
-			LoserID:  finish.LoserID.String(),
-
-			Reason: finish.Reason,
-
-			WhiteRatingBefore: finish.WhiteRatingBefore,
-			WhiteRatingAfter:  finish.WhiteRatingAfter,
-
-			BlackRatingBefore: finish.BlackRatingBefore,
-			BlackRatingAfter:  finish.BlackRatingAfter,
-
-			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-		}
-
-		finishedEvent, err := websocket.NewEvent(
-			websocket.EventGameFinished,
-			finishedPayload,
-		)
-		if err != nil {
-			return err
-		}
-
-		if err := client.Hub.SendToUser(
-			result.WhiteID.String(),
-			finishedEvent,
-		); err != nil {
-			return err
-		}
-
-		if err := client.Hub.SendToUser(
-			result.BlackID.String(),
-			finishedEvent,
-		); err != nil {
-			return err
-		}
-
-		slog.Info(
-			"game finished",
-			"match_id", result.MatchID,
-			"result", finish.Result,
-			"reason", finish.Reason,
-			"winner_id", finish.WinnerID,
-			"loser_id", finish.LoserID,
-			"white_rating_before", finish.WhiteRatingBefore,
-			"white_rating_after", finish.WhiteRatingAfter,
-			"black_rating_before", finish.BlackRatingBefore,
-			"black_rating_after", finish.BlackRatingAfter,
-		)
-
-		return nil
-	}
-
-	/*
-	 * Only a regular accepted move reaches this branch.
-	 * The board and clocks are updated from the authoritative
-	 * values calculated by the game service.
-	 */
+	// Broadcast the accepted move before a terminal result so both clients
+	// display the final position and can refresh the completed game record.
 	outgoingPayload := MoveEvent{
 		MatchID:     result.MatchID.String(),
 		MoveNumber:  result.MoveNumber,
@@ -212,6 +145,42 @@ func (s *Service) HandleMove(
 		"san", result.SAN,
 		"uci", result.UCI,
 	)
+
+	if finish := result.Finish; finish != nil {
+		finishedPayload := GameFinishedEvent{
+			MatchID:           result.MatchID.String(),
+			Result:            string(finish.Result),
+			WinnerID:          finish.WinnerID.String(),
+			LoserID:           finish.LoserID.String(),
+			Reason:            finish.Reason,
+			WhiteRatingBefore: finish.WhiteRatingBefore,
+			WhiteRatingAfter:  finish.WhiteRatingAfter,
+			BlackRatingBefore: finish.BlackRatingBefore,
+			BlackRatingAfter:  finish.BlackRatingAfter,
+			CreatedAt:         time.Now().UTC().Format(time.RFC3339Nano),
+		}
+		finishedEvent, err := websocket.NewEvent(
+			websocket.EventGameFinished,
+			finishedPayload,
+		)
+		if err != nil {
+			return err
+		}
+		if err := client.Hub.SendToUser(result.WhiteID.String(), finishedEvent); err != nil {
+			return err
+		}
+		if err := client.Hub.SendToUser(result.BlackID.String(), finishedEvent); err != nil {
+			return err
+		}
+		slog.Info(
+			"game finished",
+			"match_id", result.MatchID,
+			"result", finish.Result,
+			"reason", finish.Reason,
+			"winner_id", finish.WinnerID,
+			"loser_id", finish.LoserID,
+		)
+	}
 
 	return nil
 }
@@ -549,7 +518,7 @@ func (s *Service) HandleDrawDecline(
 
 	var opponentID uuid.UUID
 
-	switch playerID{
+	switch playerID {
 	case state.WhiteID:
 		opponentID = state.BlackID
 	case state.BlackID:
@@ -572,6 +541,5 @@ func (s *Service) HandleDrawDecline(
 		opponentID.String(),
 		declineEvent,
 	)
-
 
 }

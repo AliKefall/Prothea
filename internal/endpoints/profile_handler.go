@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/AliKefall/prothea/internal/database"
+	"github.com/AliKefall/prothea/internal/elo"
 	"github.com/AliKefall/prothea/internal/utils"
 	"github.com/google/uuid"
 )
@@ -35,19 +36,19 @@ const (
 )
 
 type RecentMatchResponse struct {
-	MatchID      uuid.UUID                    `json:"match_id"`
+	MatchID      uuid.UUID                   `json:"match_id"`
 	Opponent     RecentMatchOpponentResponse `json:"opponent"`
-	Result       RecentMatchResult            `json:"result"`
-	TimeControl  string                       `json:"time_control"`
-	RatingBefore int32                        `json:"rating_before"`
-	RatingAfter  int32                        `json:"rating_after"`
-	PlayedAt     time.Time                    `json:"played_at"`
+	Result       RecentMatchResult           `json:"result"`
+	TimeControl  string                      `json:"time_control"`
+	RatingType   string                      `json:"rating_type"`
+	RatingBefore int32                       `json:"rating_before"`
+	RatingAfter  int32                       `json:"rating_after"`
+	PlayedAt     time.Time                   `json:"played_at"`
 }
 
 type CurrentUserProfileResponse struct {
 	UserID        uuid.UUID             `json:"user_id"`
 	Username      string                `json:"username"`
-	Email         string                `json:"email"`
 	Ratings       PlayerRatingsResponse `json:"ratings"`
 	RecentMatches []RecentMatchResponse `json:"recent_matches"`
 }
@@ -100,13 +101,7 @@ func (deps *Deps) ProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	matches, err := deps.Queries.GetPlayerRecentMatches(
-		r.Context(),
-		database.GetPlayerRecentMatchesParams{
-			WhiteID: userID,
-			Limit:   10,
-		},
-	)
+	matches, err := deps.Queries.GetPlayerRecentMatches(r.Context(), userID)
 	if err != nil {
 		utils.RespondWithError(
 			w,
@@ -122,7 +117,6 @@ func (deps *Deps) ProfileHandler(w http.ResponseWriter, r *http.Request) {
 	response := CurrentUserProfileResponse{
 		UserID:   user.ID,
 		Username: user.Username,
-		Email:    user.Email,
 		Ratings: PlayerRatingsResponse{
 			Bullet: PlayerRatingResponse{},
 			Blitz:  PlayerRatingResponse{},
@@ -150,6 +144,7 @@ func (deps *Deps) ProfileHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, match := range matches {
+		ratingType, _ := elo.RatingTypeFromTimeControl(match.TimeControl)
 		var opponent RecentMatchOpponentResponse
 		var ratingBefore int32
 		var ratingAfter int32
@@ -162,6 +157,7 @@ func (deps *Deps) ProfileHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			ratingBefore = match.WhiteRatingBefore
+			ratingAfter = ratingBefore
 
 			if match.WhiteRatingAfter.Valid {
 				ratingAfter = match.WhiteRatingAfter.Int32
@@ -187,6 +183,7 @@ func (deps *Deps) ProfileHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			ratingBefore = match.BlackRatingBefore
+			ratingAfter = ratingBefore
 
 			if match.BlackRatingAfter.Valid {
 				ratingAfter = match.BlackRatingAfter.Int32
@@ -220,9 +217,10 @@ func (deps *Deps) ProfileHandler(w http.ResponseWriter, r *http.Request) {
 				Opponent:     opponent,
 				Result:       result,
 				TimeControl:  match.TimeControl,
+				RatingType:   string(ratingType),
 				RatingBefore: ratingBefore,
 				RatingAfter:  ratingAfter,
-				PlayedAt:      playedAt,
+				PlayedAt:     playedAt,
 			},
 		)
 	}
@@ -233,4 +231,3 @@ func (deps *Deps) ProfileHandler(w http.ResponseWriter, r *http.Request) {
 		response,
 	)
 }
-

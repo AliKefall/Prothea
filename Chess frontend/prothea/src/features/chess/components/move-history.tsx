@@ -1,6 +1,8 @@
 interface MoveHistoryMove {
   move_number: number;
   san: string;
+  white_time_ms?: number;
+  black_time_ms?: number;
 }
 
 interface MoveHistoryProps {
@@ -8,6 +10,7 @@ interface MoveHistoryProps {
   isLoading: boolean;
   selectedMoveNumber: number | null;
   onMoveSelect: (moveNumber: number) => void;
+  showClock?: boolean;
 }
 
 export function MoveHistory({
@@ -15,6 +18,7 @@ export function MoveHistory({
   isLoading,
   selectedMoveNumber,
   onMoveSelect,
+  showClock = false,
 }: MoveHistoryProps) {
   if (isLoading) {
     return (
@@ -57,7 +61,7 @@ export function MoveHistory({
                 className="grid grid-cols-[36px_1fr_1fr] border-t border-zinc-800 text-sm"
               >
                 <div className="px-3 py-2 text-zinc-600">{index + 1}.</div>
-{[whiteMove, blackMove].map((move) =>
+                {[whiteMove, blackMove].map((move) =>
                   move ? (
                     <button
                       key={move.move_number}
@@ -71,7 +75,12 @@ export function MoveHistory({
                           : "text-zinc-300 hover:bg-zinc-800 hover:text-white",
                       ].join(" ")}
                     >
-                      {move.san}
+                      <span>{move.san}</span>
+                      {showClock && (move.move_number % 2 === 1 ? move.white_time_ms : move.black_time_ms) !== undefined && (
+                        <time className="block text-[10px] font-normal text-zinc-500">
+                          {formatClock(move.move_number % 2 === 1 ? move.white_time_ms! : move.black_time_ms!)} left
+                        </time>
+                      )}
                     </button>
                   ) : (
                     <div key={`empty-${index}`} className="px-3 py-2 text-zinc-700" />
@@ -84,4 +93,11 @@ export function MoveHistory({
       </div>
     </div>
   );
+}
+
+function formatClock(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+  const seconds = totalSeconds % 60;
+  const minutes = Math.floor(totalSeconds / 60);
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }

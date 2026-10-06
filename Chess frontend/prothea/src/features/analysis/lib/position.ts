@@ -1,10 +1,6 @@
-// This is no special thing, it is actually the very starting point of a
-// chesboard it is a fixed variable don't change it in any worlds
+import { Chess, type Square } from "chess.js";
+import type { AnalysisMove } from "../types/analysis";
 
-import { Chess } from "chess.js";
-import { AnalysisMove } from "../types/analysis";
-
-// unless youre planning to do something else.
 export const INITIAL_FEN =
   "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -40,10 +36,16 @@ export function createMove(
   const chess = createPosition(fen);
 
   try {
+    const piece = chess.get(from as Square);
+    const targetRank = to[1];
+    const promotionPiece = promotion ??
+      (piece?.type === "p" && (targetRank === "1" || targetRank === "8")
+        ? "q"
+        : undefined);
     const move = chess.move({
       from,
       to,
-      promotion: promotion as "b" | "n" | "r" | "q" | undefined,
+      promotion: promotionPiece as "b" | "n" | "r" | "q" | undefined,
     });
 
     if (!move) {
@@ -70,7 +72,7 @@ export function getLegalMove(fen: string) {
   });
 }
 
-export function isGameOverr(fen: string): boolean {
+export function isGameOver(fen: string): boolean {
   const chess = createPosition(fen);
 
   return chess.isGameOver();
@@ -80,26 +82,3 @@ export function getTurn(fen: string): "w" | "b" {
   const chess = createPosition(fen);
   return chess.turn();
 }
-
-const playMove = useCallback(
-  (move: AnalysisMove) => {
-    const currentFen = treeState.currentNode.fen;
-
-    const nextMove = createMove(currentFen, move.from, move.to, move.promotion);
-
-    if (!nextMove) {
-      return false;
-    }
-
-    const nextFen = applyMove(currentFen, nextMove);
-
-    if (!nextFen) {
-      return false;
-    }
-
-    treeState.addVariation(treeState.currentNodeId, nextFen, nextMove);
-
-    return true;
-  },
-  [treeState.currentNode, treeState.currentNodeId, treeState.addVariation],
-);
