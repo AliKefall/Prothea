@@ -33,10 +33,6 @@ var SupportedTimeControls = []TimeControl{
 		RatingType: "blitz",
 	},
 	{
-		Name:       "5+3",
-		RatingType: "blitz",
-	},
-	{
 		Name:       "10+0",
 		RatingType: "rapid",
 	},
@@ -67,6 +63,3 @@ func GetTimeControl(value string) (TimeControl, error) {
 
 	return TimeControl{}, errors.New("unsupported time control")
 }
-
-
-

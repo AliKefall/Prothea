@@ -108,10 +108,11 @@ func (deps *Deps) HandleListFriends(w http.ResponseWriter, r *http.Request) {
 	resp := make([]FriendResponse, 0, len(friendList))
 
 	for _, friend := range friendList {
+		isOnline := deps.Hub != nil && deps.Hub.IsUserConnected(friend.ID.String())
 		resp = append(resp, FriendResponse{
 			ID:       friend.ID,
 			Username: friend.Username,
-			Online:   true, // Hardcoded at the moment this will change with a hybrid model.
+			Online:   isOnline,
 		})
 	}
 
@@ -155,31 +156,8 @@ func (deps *Deps) HandleListFriendRequests(
 		return
 	}
 
-	incoming := make(
-		[]FriendRequestResponse,
-		0,
-		len(requests.Incoming),
-	)
-
-	for _, request := range requests.Incoming {
-		incoming = append(incoming, FriendRequestResponse{
-			ID:       request.ID,
-			Username: request.Username,
-		})
-	}
-
-	outgoing := make(
-		[]FriendRequestResponse,
-		0,
-		len(requests.Outgoing),
-	)
-
-	for _, request := range requests.Outgoing {
-		outgoing = append(outgoing, FriendRequestResponse{
-			ID:       request.ID,
-			Username: request.Username,
-		})
-	}
+	incoming := mapIncomingRequests(requests.Incoming)
+	outgoing := mapOutgoingRequests(requests.Outgoing)
 
 	utils.RespondWithJSON(
 		w,

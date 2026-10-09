@@ -1,6 +1,6 @@
 "use client";
 
-import { SyntheticEvent, useEffect, useState } from "react";
+import { SyntheticEvent, useEffect, useRef, useState } from "react";
 import { ChevronDownIcon, ChevronUpIcon, XMarkIcon } from "@heroicons/react/24/outline";
 
 import { useAuthStore } from "@/features/auth/auth-store";
@@ -23,6 +23,7 @@ export function ChatPanel() {
   const error = useChatError();
 
   const { messages, loading: messagesLoading } = useConversationMessages();
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
@@ -36,6 +37,12 @@ export function ChatPanel() {
   useEffect(() => {
     void loadConversations();
   }, []);
+
+  useEffect(() => {
+    if (minimized || messagesLoading) return;
+    const container = messagesContainerRef.current;
+    if (container) container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+  }, [messages, messagesLoading, minimized, selectedConversation?.id]);
 
   function handleSubmit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -124,7 +131,7 @@ export function ChatPanel() {
           )}
 
           {/* Messages */}
-          <div className="flex h-80 flex-col gap-2 overflow-y-auto p-3">
+          <div ref={messagesContainerRef} className="flex h-80 flex-col gap-2 overflow-y-auto p-3">
             {messagesLoading ? (
               <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
                 Loading...

@@ -10,6 +10,7 @@ type PendingAnalysis = { fen: string; options: AnalysisOptions };
 
 const ENGINE_URL = "/stockfish/stockfish-19-lite-single.js";
 const ENGINE_RESPONSE_TIMEOUT_MS = 20_000;
+const UI_UPDATE_INTERVAL_MS = 120;
 
 export function useStockfish() {
   const workerRef = useRef<Worker | null>(null);
@@ -21,6 +22,9 @@ export function useStockfish() {
   const linesRef = useRef(new Map<number, EngineMove>());
   const startupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const analysisTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const uiUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestPartialResultRef = useRef<AnalysisResult | null>(null);
+  const lastUiUpdateAtRef = useRef(0);
   const [state, setState] = useState<AnalysisState>({ result: null, isAnalyzing: false, error: null });
 
   useEffect(() => {
@@ -30,6 +34,12 @@ export function useStockfish() {
     const startAnalysis = (request: PendingAnalysis) => {
       activeRef.current = request;
       linesRef.current.clear();
+      latestPartialResultRef.current = null;
+      lastUiUpdateAtRef.current = 0;
+      if (uiUpdateTimerRef.current) {
+        clearTimeout(uiUpdateTimerRef.current);
+        uiUpdateTimerRef.current = null;
+      }
       if (analysisTimerRef.current) clearTimeout(analysisTimerRef.current);
       analysisTimerRef.current = setTimeout(() => {
         if (activeRef.current !== request || linesRef.current.size > 0) return;
@@ -69,19 +79,36 @@ export function useStockfish() {
             analysisTimerRef.current = null;
           }
           linesRef.current.set(parsed.multiPv, parsed.move);
-          setState({
-            result: {
-              fen: active.fen,
-              depth: parsed.move.depth,
-              moves: [...linesRef.current.entries()].sort(([a], [b]) => a - b).map(([, move]) => move),
-            },
-            isAnalyzing: true,
-            error: null,
-          });
+          const partialResult: AnalysisResult = {
+            fen: active.fen,
+            depth: parsed.move.depth,
+            moves: [...linesRef.current.entries()].sort(([a], [b]) => a - b).map(([, move]) => move),
+          };
+          latestPartialResultRef.current = partialResult;
+          const elapsed = Date.now() - lastUiUpdateAtRef.current;
+          const publishPartialResult = () => {
+            const latest = latestPartialResultRef.current;
+            if (!latest || !activeRef.current || pendingRef.current) return;
+            lastUiUpdateAtRef.current = Date.now();
+            setState({ result: latest, isAnalyzing: true, error: null });
+          };
+          if (elapsed >= UI_UPDATE_INTERVAL_MS) {
+            publishPartialResult();
+          } else if (!uiUpdateTimerRef.current) {
+            uiUpdateTimerRef.current = setTimeout(() => {
+              uiUpdateTimerRef.current = null;
+              publishPartialResult();
+            }, UI_UPDATE_INTERVAL_MS - elapsed);
+          }
         }
         return;
       }
       if (!line.startsWith("bestmove ")) return;
+      if (uiUpdateTimerRef.current) {
+        clearTimeout(uiUpdateTimerRef.current);
+        uiUpdateTimerRef.current = null;
+      }
+      latestPartialResultRef.current = null;
       if (analysisTimerRef.current) {
         clearTimeout(analysisTimerRef.current);
         analysisTimerRef.current = null;
@@ -112,6 +139,9 @@ export function useStockfish() {
     const handleError = (event: ErrorEvent) => {
       if (startupTimerRef.current) clearTimeout(startupTimerRef.current);
       if (analysisTimerRef.current) clearTimeout(analysisTimerRef.current);
+      if (uiUpdateTimerRef.current) clearTimeout(uiUpdateTimerRef.current);
+      uiUpdateTimerRef.current = null;
+      latestPartialResultRef.current = null;
       setState({ result: null, isAnalyzing: false, error: event.message || "Stockfish failed to load" });
       activeRef.current = null;
       pendingRef.current = null;
@@ -131,6 +161,8 @@ export function useStockfish() {
       worker.terminate();
       if (startupTimerRef.current) clearTimeout(startupTimerRef.current);
       if (analysisTimerRef.current) clearTimeout(analysisTimerRef.current);
+      if (uiUpdateTimerRef.current) clearTimeout(uiUpdateTimerRef.current);
+      latestPartialResultRef.current = null;
       workerRef.current = null;
       startRef.current = null;
       readyRef.current = false;
@@ -147,6 +179,11 @@ export function useStockfish() {
     }
 
     const request = { fen, options };
+    if (uiUpdateTimerRef.current) {
+      clearTimeout(uiUpdateTimerRef.current);
+      uiUpdateTimerRef.current = null;
+    }
+    latestPartialResultRef.current = null;
     setState({ result: null, isAnalyzing: true, error: null });
     if (!readyRef.current) {
       pendingRef.current = request;
@@ -169,6 +206,11 @@ export function useStockfish() {
 
   const stop = useCallback(() => {
     pendingRef.current = null;
+    if (uiUpdateTimerRef.current) {
+      clearTimeout(uiUpdateTimerRef.current);
+      uiUpdateTimerRef.current = null;
+    }
+    latestPartialResultRef.current = null;
     if (activeRef.current && workerRef.current) {
       stoppingRef.current = true;
       workerRef.current.postMessage("stop");

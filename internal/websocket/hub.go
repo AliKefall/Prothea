@@ -171,3 +171,9 @@ func (h *Hub) hasUserConnectionLocked(userID string) bool {
 
 	return false
 }
+
+func (h *Hub) IsUserConnected(userID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.hasUserConnectionLocked(userID)
+}

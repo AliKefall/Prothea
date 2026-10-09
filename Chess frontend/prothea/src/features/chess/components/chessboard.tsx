@@ -1,7 +1,7 @@
 "use client";
 
 // FIX #3: removed unused `useRef` import
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { Chess, type Square } from "chess.js";
 import { Chessboard, type PieceDropHandlerArgs } from "react-chessboard";
 import { useQueryClient } from "@tanstack/react-query";
@@ -20,7 +20,6 @@ import { PromotionPicker } from "./promotion-picker";
 import MatchmakingPanel from "@/features/matchmaking/components/matchmaking-panel";
 import { useMatchmakingStore } from "@/features/matchmaking/store/matchmaking-store";
 import { INITIAL_FEN } from "@/features/analysis/lib/position";
-
 
 // NOTE: Tidy up this place.
 interface ChessBoardProps {
@@ -123,6 +122,54 @@ function formatClock(timeMs: number): string {
 
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
+
+const StableGameChessboard = memo(function StableGameChessboard({
+  position,
+  boardOrientation,
+  allowDragging,
+  onPieceDrop,
+}: {
+  position: string;
+  boardOrientation: "white" | "black";
+  allowDragging: boolean;
+  onPieceDrop: (args: PieceDropHandlerArgs) => boolean;
+}) {
+  const checkedKingSquare = useMemo(() => {
+    const currentPosition = new Chess(position);
+    if (!currentPosition.isCheck()) return undefined;
+    return currentPosition
+      .board()
+      .flat()
+      .find(
+        (piece) =>
+          piece?.type === "k" && piece.color === currentPosition.turn(),
+      )?.square;
+  }, [position]);
+  const squareStyles = useMemo(
+    () =>
+      checkedKingSquare
+        ? {
+            [checkedKingSquare]: {
+              background: "rgba(239, 68, 68, 0.62)",
+              boxShadow: "inset 0 0 0 4px rgba(127, 29, 29, 0.9)",
+            },
+          }
+        : {},
+    [checkedKingSquare],
+  );
+
+  return (
+    <Chessboard
+      options={{
+        position,
+        boardOrientation,
+        allowDragging,
+        onPieceDrop,
+        squareStyles,
+      }}
+    />
+  );
+});
 
 export function ChessBoard({ matchId }: ChessBoardProps) {
   const user = useAuthStore((state) => state.user);
@@ -410,52 +457,40 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
       }
 
       if (message.type === "game_presence_sync") {
-  const payload = message.payload as {
-    match_id?: string;
-    disconnected_player_id?: string;
-    deadline?: string;
-  };
+        const payload = message.payload as {
+          match_id?: string;
+          disconnected_player_id?: string;
+          deadline?: string;
+        };
 
-  if (!payload || payload.match_id !== matchId) {
-    return;
-  }
+        if (!payload || payload.match_id !== matchId) {
+          return;
+        }
 
-  if (
-    !payload.disconnected_player_id ||
-    !payload.deadline
-  ) {
-    setDisconnectedPlayerId(null);
-    setDisconnectDeadline(null);
-    setPresenceNow(Date.now());
+        if (!payload.disconnected_player_id || !payload.deadline) {
+          setDisconnectedPlayerId(null);
+          setDisconnectDeadline(null);
+          setPresenceNow(Date.now());
 
-    return;
-  }
+          return;
+        }
 
-  const deadline = Date.parse(
-    payload.deadline,
-  );
+        const deadline = Date.parse(payload.deadline);
 
-  if (!Number.isFinite(deadline)) {
-    console.error(
-      "Received invalid presence sync deadline:",
-      payload,
-    );
+        if (!Number.isFinite(deadline)) {
+          console.error("Received invalid presence sync deadline:", payload);
 
-    return;
-  }
+          return;
+        }
 
-  setDisconnectedPlayerId(
-    payload.disconnected_player_id,
-  );
+        setDisconnectedPlayerId(payload.disconnected_player_id);
 
-  setDisconnectDeadline(
-    deadline,
-  );
+        setDisconnectDeadline(deadline);
 
-  setPresenceNow(Date.now());
+        setPresenceNow(Date.now());
 
-  return;
-}
+        return;
+      }
 
       if (message.type !== "game_move") {
         return;
@@ -583,6 +618,59 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     baseClock.blackTimeMs - (!isWhiteTurn ? elapsedMs : 0),
   );
 
+  const isWhite = match && user ? match.white_id === user.user_id : true;
+  const myColor = isWhite ? "w" : "b";
+  const submitGameMove = useCallback(
+    (
+      sourceSquare: string,
+      targetSquare: string,
+      promotion?: "q" | "r" | "b" | "n",
+    ): boolean => {
+      try {
+        const nextGame = new Chess(game.fen());
+        const move = nextGame.move({
+          from: sourceSquare,
+          to: targetSquare,
+          ...(promotion ? { promotion } : {}),
+        });
+        if (!move) return false;
+
+        websocketManager.send("game_move", {
+          match_id: matchId,
+          from: sourceSquare,
+          to: targetSquare,
+          promotion: move.promotion ?? "",
+          uci: `${move.from}${move.to}${move.promotion ?? ""}`,
+        });
+        return true;
+      } catch (error) {
+        console.error("Failed to create chess move:", error);
+        return false;
+      }
+    },
+    [game, matchId],
+  );
+  const handlePieceDrop = useCallback(
+    ({ sourceSquare, targetSquare }: PieceDropHandlerArgs): boolean => {
+      if (!targetSquare || !match || !user) return false;
+      if (gameFinished || match.result !== "pending" || isReviewingMove) return false;
+
+      const piece = game.get(sourceSquare as Square);
+      if (!piece || piece.color !== myColor || game.turn() !== myColor) return false;
+
+      const promotionMove = game
+        .moves({ verbose: true })
+        .find((move) => move.from === sourceSquare && move.to === targetSquare && move.promotion);
+      if (promotionMove) {
+        setPromotionRequest({ from: sourceSquare, to: targetSquare, color: piece.color });
+        return false;
+      }
+
+      return submitGameMove(sourceSquare, targetSquare);
+    },
+    [game, gameFinished, isReviewingMove, match, myColor, submitGameMove, user],
+  );
+
   if (isMatchLoading) {
     return (
       <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-zinc-950 text-white">
@@ -607,8 +695,6 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
   const currentMatch = match;
   const currentUser = user;
 
-  const isWhite = currentMatch.white_id === currentUser.user_id;
-  const myColor = isWhite ? "w" : "b";
   const myUsername = isWhite
     ? currentMatch.white_username
     : currentMatch.black_username;
@@ -621,82 +707,6 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
   const opponentRating = isWhite
     ? currentMatch.black_rating
     : currentMatch.white_rating;
-
-  function submitGameMove(
-    sourceSquare: string,
-    targetSquare: string,
-    promotion?: "q" | "r" | "b" | "n",
-  ): boolean {
-    try {
-      const nextGame = new Chess(game.fen());
-      const move = nextGame.move({
-        from: sourceSquare,
-        to: targetSquare,
-        ...(promotion ? { promotion } : {}),
-      });
-      if (!move) return false;
-
-      websocketManager.send("game_move", {
-        match_id: matchId,
-        from: sourceSquare,
-        to: targetSquare,
-        promotion: move.promotion ?? "",
-        uci: `${move.from}${move.to}${move.promotion ?? ""}`,
-      });
-      return true;
-    } catch (error) {
-      console.error("Failed to create chess move:", error);
-      return false;
-    }
-  }
-
-  function handlePieceDrop({
-    sourceSquare,
-    targetSquare,
-  }: PieceDropHandlerArgs): boolean {
-    if (!targetSquare) {
-      return false;
-    }
-
-    if (gameFinished || currentMatch.result !== "pending") {
-      return false;
-    }
-
-    // A historical board position is read-only; moves can only be made from live play.
-    if (isReviewingMove) {
-      return false;
-    }
-
-    const piece = game.get(sourceSquare as Square);
-
-    if (!piece) {
-      return false;
-    }
-
-    if (piece.color !== myColor) {
-      return false;
-    }
-
-    if (game.turn() !== myColor) {
-      return false;
-    }
-
-    const promotionMove = game.moves({ verbose: true }).find(
-      (move) => move.from === sourceSquare &&
-        move.to === targetSquare &&
-        move.promotion,
-    );
-    if (promotionMove) {
-      setPromotionRequest({
-        from: sourceSquare,
-        to: targetSquare,
-        color: piece.color,
-      });
-      return false;
-    }
-
-    return submitGameMove(sourceSquare, targetSquare);
-  }
 
   const disconnectRemainingMs =
     disconnectDeadline === null
@@ -712,12 +722,12 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     disconnectedPlayerId === currentUser?.user_id;
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-zinc-950 p-6 text-white">
-      <div className="mx-auto flex h-full w-full max-w-6xl items-center justify-center">
+    <div className="min-h-[calc(100vh-4rem)] bg-zinc-950 p-6 text-white aspect-square">
+      <div className="mx-auto flex min-h-[calc(100vh-7rem)] w-full max-w-6xl items-start justify-center pt-2">
         {/* FIX #1: ChessWorkspace expects `board` and `sidebar` props, not children */}
         <ChessWorkspace
           board={
-            <div className="flex min-w-0 flex-col items-center">
+            <div className="flex min-w-0 flex-col items-center self-start">
               <div className="mb-3 flex w-full max-w-130 items-center justify-between">
                 {disconnectDeadline !== null && (
                   <div className="mb-3 w-full max-w-130 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
@@ -765,25 +775,30 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                 </div>
               </div>
 
-              <div className="relative w-full max-w-130 overflow-hidden rounded-lg shadow-2xl">
-                <Chessboard
-                  options={{
-                    position,
-                    boardOrientation: isWhite ? "white" : "black",
-                    allowDragging:
-                      !promotionRequest &&
-                      !gameFinished &&
-                      currentMatch.result === "pending" &&
-                      !isReviewingMove,
-                    onPieceDrop: handlePieceDrop,
-                  }}
+              <div className="relative aspect-square w-full max-w-130 shrink-0 overflow-hidden rounded-lg shadow-2xl">
+                <StableGameChessboard
+                  position={position}
+                  boardOrientation={isWhite ? "white" : "black"}
+                  allowDragging={
+                    !promotionRequest &&
+                    !gameFinished &&
+                    currentMatch.result === "pending" &&
+                    !isReviewingMove
+                  }
+                  onPieceDrop={handlePieceDrop}
                 />
                 {promotionRequest && (
                   <PromotionPicker
                     color={promotionRequest.color}
                     onCancelAction={() => setPromotionRequest(null)}
                     onSelectAction={(promotion) => {
-                      if (submitGameMove(promotionRequest.from, promotionRequest.to, promotion)) {
+                      if (
+                        submitGameMove(
+                          promotionRequest.from,
+                          promotionRequest.to,
+                          promotion,
+                        )
+                      ) {
                         setPromotionRequest(null);
                       }
                     }}
@@ -881,18 +896,20 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                     </div>
                   )}
 
-                  {gameFinished && finishResult && activeTab !== "matchmaking" && (
-                    <GameResult
-                      matchId={matchId}
-                      result={finishResult.result}
-                      reason={finishResult.reason}
-                      isWhite={isWhite}
-                      whiteRatingBefore={finishResult.white_rating_before}
-                      whiteRatingAfter={finishResult.white_rating_after}
-                      blackRatingBefore={finishResult.black_rating_before}
-                      blackRatingAfter={finishResult.black_rating_after}
-                    />
-                  )}
+                  {gameFinished &&
+                    finishResult &&
+                    activeTab !== "matchmaking" && (
+                      <GameResult
+                        matchId={matchId}
+                        result={finishResult.result}
+                        reason={finishResult.reason}
+                        isWhite={isWhite}
+                        whiteRatingBefore={finishResult.white_rating_before}
+                        whiteRatingAfter={finishResult.white_rating_after}
+                        blackRatingBefore={finishResult.black_rating_before}
+                        blackRatingAfter={finishResult.black_rating_after}
+                      />
+                    )}
 
                   {!gameFinished && !drawOfferReceived && (
                     <div className="border-t border-zinc-800 p-4">
@@ -984,7 +1001,6 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
               )}
 
               {activeTab === "matchmaking" && <MatchmakingPanel embedded />}
-
             </ChessSidebar>
           }
         />

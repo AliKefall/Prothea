@@ -38,7 +38,8 @@ export function createMove(
   try {
     const piece = chess.get(from as Square);
     const targetRank = to[1];
-    const promotionPiece = promotion ??
+    const promotionPiece =
+      promotion ??
       (piece?.type === "p" && (targetRank === "1" || targetRank === "8")
         ? "q"
         : undefined);

@@ -59,10 +59,17 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 		gameLock,
 		eloService,
 	)
+	friendsService := friends.NewService(conn, queries, hub)
 
 	hub.SetUserLifecycleHandler(
-		gameService.HandleUserConnected,
-		gameService.HandleUserDisconnected,
+		func(client *websocket.Client) {
+			gameService.HandleUserConnected(client)
+			friendsService.HandleUserConnected(client)
+		},
+		func(client *websocket.Client) {
+			gameService.HandleUserDisconnected(client)
+			friendsService.HandleUserDisconnected(client)
+		},
 	)
 
 	hub.Register(
@@ -101,7 +108,7 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 		RedisClient: redisClient,
 		Hasher:      auth.NewPasswordHasher(),
 		JWT:         auth.NewJWTManager(config.JWTSecret, 15*time.Minute),
-		Friends:     friends.NewService(conn, queries, hub),
+		Friends:     friendsService,
 		Matchmaking: matchmakingService,
 		Hub:         hub,
 		Chat:        chatService,

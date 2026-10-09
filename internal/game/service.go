@@ -984,7 +984,7 @@ func (s *Service) RejectDraw(
 //
 // Examples:
 //   - 10+0 -> 600000 ms initial time, 0 ms increment
-//   - 5+3  -> 300000 ms initial time, 3000 ms increment
+//   - 3+2  -> 180000 ms initial time, 2000 ms increment
 func parseTimeControl(
 	timeControl string,
 ) (int64, int64, error) {

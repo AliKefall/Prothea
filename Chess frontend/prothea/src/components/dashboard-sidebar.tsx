@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ArrowRightStartOnRectangleIcon, Bars3Icon, BoltIcon, UserCircleIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ArrowRightStartOnRectangleIcon, Bars3Icon, BoltIcon, ChartBarIcon, UserCircleIcon, XMarkIcon } from "@heroicons/react/24/outline";
 
 import { useAuthStore } from "@/features/auth/auth-store";
 import { useLogout } from "@/features/auth/hooks/use-logout";
@@ -18,8 +18,14 @@ const navigation = [
   {
     label: "Profile",
     href: "/dashboard/profile",
-    activePaths: ["/dashboard/profile", "/dashboard/analysis"],
+    activePaths: ["/dashboard/profile"],
     Icon: UserCircleIcon,
+  },
+  {
+    label: "Analysis",
+    href: "/dashboard/analysis",
+    activePaths: ["/dashboard/analysis"],
+    Icon: ChartBarIcon,
   },
 ];
 
@@ -44,7 +50,7 @@ export function DashboardSidebar() {
           onClick={() => setMobileOpen(true)}
           aria-label="Open navigation"
           aria-expanded={false}
-          className="fixed left-4 top-4 z-[60] flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 text-white shadow-lg md:hidden"
+          className="fixed left-4 top-4 z-60 flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 text-white shadow-lg md:hidden"
         >
           <Bars3Icon className="h-5 w-5" />
         </button>

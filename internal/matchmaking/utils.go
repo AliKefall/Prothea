@@ -3,17 +3,8 @@ package matchmaking
 import (
 	"fmt"
 	"strconv"
-	"time"
-
-	"github.com/google/uuid"
 )
 
-func ttl(value time.Duration) time.Duration {
-	if value <= 0 {
-		return DefaultQueueTTL
-	}
-	return value
-}
 
 func queueKey(timeControl string) string {
 	if timeControl == "" {
@@ -22,9 +13,7 @@ func queueKey(timeControl string) string {
 	return "matchmaking:queue:" + timeControl
 }
 
-func userKey(userID uuid.UUID) string {
-	return "matchmaking:user:" + userID.String()
-}
+
 
 // This is kinda bad code. But it gets the job done for now
 // NOTE: Change this in production
