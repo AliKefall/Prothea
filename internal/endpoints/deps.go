@@ -1,8 +1,10 @@
 package endpoints
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
+	"time"
 
 	"github.com/AliKefall/prothea/internal/auth"
 	"github.com/AliKefall/prothea/internal/chat"
@@ -14,17 +16,22 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+type LoginSessionStore interface {
+	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.StatusCmd
+}
+
 type Deps struct {
-	DB          *sql.DB
-	Queries     *database.Queries
-	RedisClient *redis.Client
-	Hasher      *auth.PasswordHasher
-	JWT         *auth.JWTManager
-	Friends     *friends.Service
-	Matchmaking *matchmaking.Service
-	Hub         *websocket.Hub
-	Chat        *chat.Service
-	Game *game.Service
+	DB                *sql.DB
+	Queries           *database.Queries
+	RedisClient       *redis.Client
+	LoginSessionStore LoginSessionStore
+	Hasher            *auth.PasswordHasher
+	JWT               *auth.JWTManager
+	Friends           *friends.Service
+	Matchmaking       *matchmaking.Service
+	Hub               *websocket.Hub
+	Chat              *chat.Service
+	Game              *game.Service
 }
 
 func (deps *Deps) MustUserIDString(r *http.Request) (string, error) {

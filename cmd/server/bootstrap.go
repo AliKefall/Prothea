@@ -26,8 +26,6 @@ type serverDependencies struct {
 	redis   *redis.Client
 }
 
-//NOTE: Tidy up this place
-
 func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 	conn := mustOpenDatabase(config)
 	queries := database.New(conn)
@@ -35,32 +33,72 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 	redisClient := NewRedisClient(config.RedisURL)
 
 	hub := websocket.NewHub()
+	chatService := configureChat(conn, queries, hub)
+	matchmakingService := configureMatchmaking(redisClient)
+	gameService := configureGame(conn, queries, redisClient)
+	friendsService := configureFriends(conn, queries, hub)
+	configureGameEvents(hub, gameService)
+	configureUserLifecycle(hub, gameService, friendsService)
 
-	chatService := chat.NewService(conn, queries, hub)
-	hub.Register(
-		websocket.EventChatSend,
-		chatService.HandleSendMessage,
-	)
+	deps := &endpoints.Deps{
+		DB:                conn,
+		Queries:           queries,
+		RedisClient:       redisClient,
+		LoginSessionStore: redisClient,
+		Hasher:            auth.NewPasswordHasher(),
+		JWT:               auth.NewJWTManager(config.JWTSecret, 15*time.Minute),
+		Friends:           friendsService,
+		Matchmaking:       matchmakingService,
+		Hub:               hub,
+		Chat:              chatService,
+		Game:              gameService,
+	}
 
-	matchmakingService := matchmaking.NewMatchmakingService(redisClient)
+	return conn, serverDependencies{
+		deps:    deps,
+		queries: queries,
+		hub:     hub,
+		redis:   redisClient,
+	}
+}
 
-	gameStateStore := game.NewRedisStateStore(redisClient)
-	gameLock := game.NewRedisGameLock(redisClient)
+func configureChat(conn *sql.DB, queries *database.Queries, hub *websocket.Hub) *chat.Service {
+	service := chat.NewService(conn, queries, hub)
+	hub.Register(websocket.EventChatSend, service.HandleSendMessage)
+	return service
+}
+
+func configureMatchmaking(redisClient *redis.Client) *matchmaking.Service {
+	return matchmaking.NewMatchmakingService(redisClient)
+}
+
+func configureGame(
+	conn *sql.DB,
+	queries *database.Queries,
+	redisClient *redis.Client,
+) *game.Service {
+	stateStore := game.NewRedisStateStore(redisClient)
 	disconnectStore := game.NewRedisDisconnectStore(redisClient)
-	eloRepository := elo.NewRepository(conn, queries)
+	gameLock := game.NewRedisGameLock(redisClient)
+	ratingService := elo.NewService(elo.NewRepository(conn, queries))
 
-	eloService := elo.NewService(eloRepository)
 	gameService := game.NewService(
 		conn,
 		queries,
-		gameStateStore,
+		stateStore,
 		disconnectStore,
 		game.NewChessValidator(),
 		gameLock,
-		eloService,
+		ratingService,
 	)
-	friendsService := friends.NewService(conn, queries, hub)
+	return gameService
+}
 
+func configureFriends(conn *sql.DB, queries *database.Queries, hub *websocket.Hub) *friends.Service {
+	return friends.NewService(conn, queries, hub)
+}
+
+func configureUserLifecycle(hub *websocket.Hub, gameService *game.Service, friendsService *friends.Service) {
 	hub.SetUserLifecycleHandler(
 		func(client *websocket.Client) {
 			gameService.HandleUserConnected(client)
@@ -71,56 +109,15 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 			friendsService.HandleUserDisconnected(client)
 		},
 	)
+}
 
-	hub.Register(
-		websocket.EventGameMove,
-		gameService.HandleMove,
-	)
-
-	hub.Register(
-		websocket.EventGameResign,
-		gameService.HandlerResign,
-	)
-
-	hub.Register(
-		websocket.EventGameDrawOffer,
-		gameService.HandleDrawOffer,
-	)
-
-	hub.Register(
-		websocket.EventGameDrawReject,
-		gameService.HandleDrawDecline,
-	)
-
-	hub.Register(
-		websocket.EventGameDrawAccept,
-		gameService.HandleDrawAccept,
-	)
-
-	hub.Register(
-		websocket.EventGamePresenceSyncRequest,
-		gameService.HandlePresenceSync,
-	)
-
-	deps := &endpoints.Deps{
-		DB:          conn,
-		Queries:     queries,
-		RedisClient: redisClient,
-		Hasher:      auth.NewPasswordHasher(),
-		JWT:         auth.NewJWTManager(config.JWTSecret, 15*time.Minute),
-		Friends:     friendsService,
-		Matchmaking: matchmakingService,
-		Hub:         hub,
-		Chat:        chatService,
-		Game:        gameService,
-	}
-
-	return conn, serverDependencies{
-		deps:    deps,
-		queries: queries,
-		hub:     hub,
-		redis:   redisClient,
-	}
+func configureGameEvents(hub *websocket.Hub, service *game.Service) {
+	hub.Register(websocket.EventGameMove, service.HandleMove)
+	hub.Register(websocket.EventGameResign, service.HandlerResign)
+	hub.Register(websocket.EventGameDrawOffer, service.HandleDrawOffer)
+	hub.Register(websocket.EventGameDrawReject, service.HandleDrawDecline)
+	hub.Register(websocket.EventGameDrawAccept, service.HandleDrawAccept)
+	hub.Register(websocket.EventGamePresenceSyncRequest, service.HandlePresenceSync)
 }
 
 func mustOpenDatabase(config *ServerConfig) *sql.DB {

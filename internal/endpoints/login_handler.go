@@ -27,6 +27,14 @@ func (deps *Deps) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 
 	if err := utils.DecodeJSON(w, r, &req); err != nil {
+		utils.RespondWithError(
+			w,
+			http.StatusBadRequest,
+			"json_error",
+			"Could not parse login request",
+			"",
+			err,
+		)
 		return
 	}
 
@@ -171,7 +179,11 @@ func (deps *Deps) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := deps.RedisClient.Set(
+	sessionStore := deps.LoginSessionStore
+	if sessionStore == nil {
+		sessionStore = deps.RedisClient
+	}
+	if err := sessionStore.Set(
 		ctx,
 		"sess:"+refreshHash,
 		user.ID.String(),
@@ -195,7 +207,7 @@ func (deps *Deps) LoginHandler(w http.ResponseWriter, r *http.Request) {
 			Value:    refreshToken,
 			HttpOnly: true,
 			Secure:   utils.ShouldUseSecureCookie(r),
-			SameSite: http.SameSiteLaxMode, // NOTE: Don't forget to change this in prod
+			SameSite: http.SameSiteLaxMode,
 			Path:     "/",
 			Expires:  refreshExpires,
 			MaxAge:   int(refreshTTL.Seconds()),
