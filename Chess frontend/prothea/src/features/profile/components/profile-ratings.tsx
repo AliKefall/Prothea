@@ -1,12 +1,16 @@
 "use client";
 
 import { useRatingStore } from "../rating-store";
+import type { PlayerRatings as PlayerRatingsData } from "../types/profile-types";
 import { RatingCard } from "./rating-card";
 
-export function ProfileRatings() {
-  const bullet = useRatingStore((state) => state.bullet);
-  const blitz = useRatingStore((state) => state.blitz);
-  const rapid = useRatingStore((state) => state.rapid);
+export function ProfileRatings({ ratings }: { ratings?: PlayerRatingsData }) {
+  const storedBullet = useRatingStore((state) => state.bullet);
+  const storedBlitz = useRatingStore((state) => state.blitz);
+  const storedRapid = useRatingStore((state) => state.rapid);
+  const bullet = ratings?.bullet ?? storedBullet;
+  const blitz = ratings?.blitz ?? storedBlitz;
+  const rapid = ratings?.rapid ?? storedRapid;
 
   return (
     <section>

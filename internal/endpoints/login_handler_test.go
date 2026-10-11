@@ -25,6 +25,7 @@ import (
 type loginDBConfig struct {
 	userID, email, username, passwordHash string
 	createSessionErr                      error
+	searchResults                         []database.SearchPlayersRow
 }
 
 var (
@@ -57,6 +58,16 @@ func (loginConn) Close() error              { return nil }
 func (loginConn) Begin() (driver.Tx, error) { return nil, errors.New("transactions not supported") }
 func (c loginConn) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
 	switch {
+	case strings.Contains(query, "FROM player_ratings"):
+		return &loginRows{columns: []string{"user_id", "rating_type", "rating", "rd", "volatility", "games_played", "created_at", "updated_at"}}, nil
+	case strings.Contains(query, "FROM matches AS m"):
+		return &loginRows{columns: []string{"id", "white_id", "white_username", "black_id", "black_username", "time_control", "white_rating_before", "black_rating_before", "white_rating_after", "black_rating_after", "result", "created_at", "finished_at"}}, nil
+	case strings.Contains(query, "POSITION(LOWER($1) IN LOWER(username))"):
+		rows := &loginRows{columns: []string{"id", "username"}}
+		for _, player := range c.config.searchResults {
+			rows.values = append(rows.values, player.ID.String(), player.Username)
+		}
+		return rows, nil
 	case strings.Contains(query, "FROM users"):
 		if c.config.userID == "" {
 			return &loginRows{columns: []string{"id", "email", "username", "password", "created_at", "updated_at"}}, nil

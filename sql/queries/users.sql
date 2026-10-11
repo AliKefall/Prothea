@@ -29,3 +29,13 @@ WHERE email = $1;
 SELECT *
 FROM users
 WHERE username = $1;
+
+-- name: SearchPlayers :many
+SELECT id, username
+FROM users
+WHERE id <> $2
+  AND POSITION(LOWER($1) IN LOWER(username)) > 0
+ORDER BY
+  CASE WHEN POSITION(LOWER($1) IN LOWER(username)) = 1 THEN 0 ELSE 1 END,
+  LOWER(username)
+LIMIT $3;

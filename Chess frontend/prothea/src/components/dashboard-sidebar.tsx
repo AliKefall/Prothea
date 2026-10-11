@@ -3,17 +3,29 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ArrowRightStartOnRectangleIcon, Bars3Icon, BoltIcon, ChartBarIcon, UserCircleIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ArrowRightStartOnRectangleIcon, Bars3Icon, BoltIcon, ChartBarIcon, CpuChipIcon, HomeIcon, UserCircleIcon, XMarkIcon } from "@heroicons/react/24/outline";
 
 import { useAuthStore } from "@/features/auth/auth-store";
 import { useLogout } from "@/features/auth/hooks/use-logout";
 
 const navigation = [
   {
+    label: "Home",
+    href: "/dashboard",
+    activePaths: ["/dashboard"],
+    Icon: HomeIcon,
+  },
+  {
     label: "Play",
     href: "/dashboard/matchmaking",
     activePaths: ["/dashboard/matchmaking", "/dashboard/chess"],
     Icon: BoltIcon,
+  },
+  {
+    label: "Bots",
+    href: "/dashboard/bots",
+    activePaths: ["/dashboard/bots"],
+    Icon: CpuChipIcon,
   },
   {
     label: "Profile",
@@ -82,7 +94,7 @@ export function DashboardSidebar() {
           <p className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Menu</p>
           <div className="space-y-1">
             {navigation.map(({ label, href, activePaths, Icon }) => {
-              const active = activePaths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+              const active = activePaths.some((path) => pathname === path || (path !== "/dashboard" && pathname.startsWith(`${path}/`)));
               return (
                 <Link
                   key={href}

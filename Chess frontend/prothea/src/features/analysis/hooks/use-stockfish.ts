@@ -4,13 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AnalysisResult, EngineMove } from "../types/analysis";
 
-type AnalysisOptions = { depth: number; multiPv: number };
+type AnalysisOptions = { depth: number; multiPv: number; elo?: number };
 type AnalysisState = { result: AnalysisResult | null; isAnalyzing: boolean; error: string | null };
 type PendingAnalysis = { fen: string; options: AnalysisOptions };
 
 const ENGINE_URL = "/stockfish/stockfish-19-lite-single.js";
 const ENGINE_RESPONSE_TIMEOUT_MS = 20_000;
 const UI_UPDATE_INTERVAL_MS = 120;
+const MIN_PUBLISH_DEPTH = 8; // çok düşük derinlikteki oynak sonuçları gösterme
 
 export function useStockfish() {
   const workerRef = useRef<Worker | null>(null);
@@ -48,6 +49,12 @@ export function useStockfish() {
         setState({ result: null, isAnalyzing: false, error: "Stockfish did not return an evaluation. Check the engine and WASM assets." });
       }, ENGINE_RESPONSE_TIMEOUT_MS);
       worker.postMessage(`setoption name MultiPV value ${request.options.multiPv}`);
+      if (request.options.elo === undefined) {
+        worker.postMessage("setoption name UCI_LimitStrength value false");
+      } else {
+        worker.postMessage("setoption name UCI_LimitStrength value true");
+        worker.postMessage(`setoption name UCI_Elo value ${request.options.elo}`);
+      }
       worker.postMessage("ucinewgame");
       worker.postMessage(`position fen ${request.fen}`);
       worker.postMessage(`go depth ${request.options.depth}`);
@@ -79,6 +86,11 @@ export function useStockfish() {
             analysisTimerRef.current = null;
           }
           linesRef.current.set(parsed.multiPv, parsed.move);
+
+          // Bu derinlik için tüm MultiPV satırları gelmeden yayınlama
+          if (parsed.multiPv !== active.options.multiPv) return;
+          if (parsed.move.depth < Math.min(MIN_PUBLISH_DEPTH, active.options.depth)) return;
+
           const partialResult: AnalysisResult = {
             fen: active.fen,
             depth: parsed.move.depth,
@@ -184,7 +196,8 @@ export function useStockfish() {
       uiUpdateTimerRef.current = null;
     }
     latestPartialResultRef.current = null;
-    setState({ result: null, isAnalyzing: true, error: null });
+    // Eski sonucu silme: panel boşalıp tekrar dolmasın
+    setState((current) => ({ result: current.result, isAnalyzing: true, error: null }));
     if (!readyRef.current) {
       pendingRef.current = request;
       return;
@@ -227,6 +240,8 @@ export function useStockfish() {
 
 function parseInfoLine(line: string, fen: string): { multiPv: number; move: EngineMove } | null {
   const tokens = line.trim().split(/\s+/);
+  // lowerbound/upperbound satırları değerlendirmenin sıçramasına yol açar
+  if (tokens.includes("lowerbound") || tokens.includes("upperbound")) return null;
   const depth = readInteger(tokens, "depth");
   const multiPv = readInteger(tokens, "multipv") ?? 1;
   const scoreIndex = tokens.indexOf("score");

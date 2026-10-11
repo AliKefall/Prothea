@@ -124,3 +124,46 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 	)
 	return i, err
 }
+
+const searchPlayers = `-- name: SearchPlayers :many
+SELECT id, username
+FROM users
+WHERE id <> $2
+  AND POSITION(LOWER($1) IN LOWER(username)) > 0
+ORDER BY
+  CASE WHEN POSITION(LOWER($1) IN LOWER(username)) = 1 THEN 0 ELSE 1 END,
+  LOWER(username)
+LIMIT $3
+`
+
+type SearchPlayersParams struct {
+	Query         string
+	ExcludeUserID uuid.UUID
+	Limit         int32
+}
+
+type SearchPlayersRow struct {
+	ID       uuid.UUID
+	Username string
+}
+
+func (q *Queries) SearchPlayers(ctx context.Context, arg SearchPlayersParams) ([]SearchPlayersRow, error) {
+	rows, err := q.db.QueryContext(ctx, searchPlayers, arg.Query, arg.ExcludeUserID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]SearchPlayersRow, 0)
+	for rows.Next() {
+		var item SearchPlayersRow
+		if err := rows.Scan(&item.ID, &item.Username); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

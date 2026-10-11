@@ -1,12 +1,17 @@
 package endpoints
 
 import (
+	"context"
+	"database/sql"
+	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/AliKefall/prothea/internal/database"
 	"github.com/AliKefall/prothea/internal/elo"
 	"github.com/AliKefall/prothea/internal/utils"
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
@@ -69,10 +74,7 @@ func (deps *Deps) ProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := deps.Queries.GetUserByID(
-		r.Context(),
-		userID,
-	)
+	user, err := deps.Queries.GetUserByID(r.Context(), userID)
 	if err != nil {
 		utils.RespondWithError(
 			w,
@@ -85,33 +87,88 @@ func (deps *Deps) ProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ratings, err := deps.Queries.GetPlayerRatings(
-		r.Context(),
-		userID,
-	)
+	response, err := deps.loadProfileResponse(r.Context(), user)
 	if err != nil {
 		utils.RespondWithError(
 			w,
 			http.StatusInternalServerError,
 			"database_error",
-			"Could not load player ratings",
+			err.Error(),
 			"",
 			err,
 		)
 		return
 	}
+	utils.RespondWithJSON(w, http.StatusOK, response)
+}
 
-	matches, err := deps.Queries.GetPlayerRecentMatches(r.Context(), userID)
-	if err != nil {
-		utils.RespondWithError(
-			w,
-			http.StatusInternalServerError,
-			"database_error",
-			"Could not load recent matches",
-			"",
-			err,
-		)
+func (deps *Deps) PlayerProfileHandler(w http.ResponseWriter, r *http.Request) {
+	username := strings.TrimSpace(chi.URLParam(r, "username"))
+	if username == "" {
+		utils.RespondWithError(w, http.StatusBadRequest, "validation_error", "Username is required", "", nil)
 		return
+	}
+
+	user, err := deps.Queries.GetUserByUsername(r.Context(), username)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			utils.RespondWithError(w, http.StatusNotFound, "not_found", "Player not found", "", nil)
+			return
+		}
+		utils.RespondWithError(w, http.StatusInternalServerError, "database_error", "Could not load player", "", err)
+		return
+	}
+
+	response, err := deps.loadProfileResponse(r.Context(), user)
+	if err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, "database_error", err.Error(), "", err)
+		return
+	}
+	utils.RespondWithJSON(w, http.StatusOK, response)
+}
+
+type PlayerSearchResult struct {
+	UserID   uuid.UUID `json:"user_id"`
+	Username string    `json:"username"`
+}
+
+type PlayerSearchResponse struct {
+	Players []PlayerSearchResult `json:"players"`
+}
+
+func (deps *Deps) SearchPlayersHandler(w http.ResponseWriter, r *http.Request) {
+	userID, ok := r.Context().Value(UserIDKey).(uuid.UUID)
+	if !ok {
+		utils.RespondWithError(w, http.StatusUnauthorized, "unauthorized", "Unauthorized", "", nil)
+		return
+	}
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	response := PlayerSearchResponse{Players: make([]PlayerSearchResult, 0)}
+	if len([]rune(query)) < 2 {
+		utils.RespondWithJSON(w, http.StatusOK, response)
+		return
+	}
+	players, err := deps.Queries.SearchPlayers(r.Context(), database.SearchPlayersParams{
+		Query: query, ExcludeUserID: userID, Limit: 10,
+	})
+	if err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, "database_error", "Could not search players", "", err)
+		return
+	}
+	for _, player := range players {
+		response.Players = append(response.Players, PlayerSearchResult{UserID: player.ID, Username: player.Username})
+	}
+	utils.RespondWithJSON(w, http.StatusOK, response)
+}
+
+func (deps *Deps) loadProfileResponse(ctx context.Context, user database.User) (CurrentUserProfileResponse, error) {
+	ratings, err := deps.Queries.GetPlayerRatings(ctx, user.ID)
+	if err != nil {
+		return CurrentUserProfileResponse{}, errors.New("Could not load player ratings")
+	}
+	matches, err := deps.Queries.GetPlayerRecentMatches(ctx, user.ID)
+	if err != nil {
+		return CurrentUserProfileResponse{}, errors.New("Could not load recent matches")
 	}
 
 	response := CurrentUserProfileResponse{
@@ -150,7 +207,7 @@ func (deps *Deps) ProfileHandler(w http.ResponseWriter, r *http.Request) {
 		var ratingAfter int32
 		var result RecentMatchResult
 
-		if match.WhiteID == userID {
+		if match.WhiteID == user.ID {
 			opponent = RecentMatchOpponentResponse{
 				ID:       match.BlackID,
 				Username: match.BlackUsername,
@@ -225,9 +282,5 @@ func (deps *Deps) ProfileHandler(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
-	utils.RespondWithJSON(
-		w,
-		http.StatusOK,
-		response,
-	)
+	return response, nil
 }

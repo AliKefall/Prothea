@@ -2,6 +2,7 @@ import { FriendsPanel } from "@/features/friends/components/friends-panel";
 import { FriendsPanelButton } from "@/features/friends/components/friends-panel-button";
 import { ChatPanel } from "@/features/chat/components/chat-panel";
 import { DashboardSidebar } from "@/components/dashboard-sidebar";
+import { DashboardTopbar } from "@/components/dashboard-topbar";
 import { ProfileHydrator } from "@/features/profile/components/profile-hydrator";
 
 export default function DashboardLayout({
@@ -14,6 +15,7 @@ export default function DashboardLayout({
       <DashboardSidebar />
 
       <div className="min-h-screen pl-0 pt-16 md:pl-64 md:pt-0">
+        <DashboardTopbar />
         <div className="mx-auto max-w-7xl p-6">
           {children}
         </div>
