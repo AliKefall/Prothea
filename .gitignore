@@ -1,5 +1,9 @@
+.dockerignore
+.env.example
 .env
-
+observability/
+public/
+./compose.yaml
 **/node_modules/
 **/.next/
 **/out/

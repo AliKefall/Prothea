@@ -216,7 +216,13 @@ func (c *Client) SendEvent(event Event) error {
 		return err
 	}
 
-	return c.SendRaw(data)
+	if err := c.SendRaw(data); err != nil {
+		return err
+	}
+	if c.Hub != nil {
+		c.Hub.metrics.ObserveWSMessage("sent", event.Type)
+	}
+	return nil
 }
 
 func (c *Client) SendRaw(data []byte) error {

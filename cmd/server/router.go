@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"log/slog"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/AliKefall/prothea/internal/endpoints"
+	"github.com/AliKefall/prothea/internal/metrics"
 	"github.com/AliKefall/prothea/internal/ratelimiter"
 	"github.com/AliKefall/prothea/internal/utils"
 	"github.com/AliKefall/prothea/internal/websocket"
@@ -15,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
@@ -43,10 +46,17 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 		MaxAge:           300,
 	}))
 
+	observability := metrics.NewMetrics()
+	if deps.Hub != nil {
+		deps.Hub.SetMetrics(observability)
+	}
+
 	log.Printf("Allowed origins: %#v", config.AllowedOrigins)
+
+	router.Use(metrics.Middleware(observability))
+	router.Use(httpRequestLogMiddleware)
 	router.Use(middleware.RequestID)
 	router.Use(requestIDResponseHeaderMiddleware)
-	router.Use(httpRequestLogMiddleware)
 	router.Use(middleware.Recoverer)
 	router.Use(securityHeaderMiddleware)
 	rateLimiter, err := ratelimiter.NewRedisTokenBucketLimiter(deps.RedisClient, 20, 10)
@@ -68,6 +78,24 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 			return
 		}
 		websocket.ServeWS(deps.Hub, w, r, uid.String(), user.Username, nil)
+	})
+
+	router.Handle("/metrics", promhttp.Handler())
+	router.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok\n"))
+	})
+	router.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+
+		if deps.DB == nil || deps.RedisClient == nil ||
+			deps.DB.PingContext(ctx) != nil || deps.RedisClient.Ping(ctx).Err() != nil {
+			http.Error(w, "not ready", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ready\n"))
 	})
 
 	router.Group(func(pr chi.Router) {

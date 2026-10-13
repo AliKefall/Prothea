@@ -9,6 +9,7 @@ func (h *Hub) dispatch(
 	ctx context.Context,
 	in inbound,
 ) {
+	h.metrics.ObserveWSMessage("received", in.event.Type)
 	handler, ok := h.events[EventType(in.event.Type)]
 
 	if !ok {

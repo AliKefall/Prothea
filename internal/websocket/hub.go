@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
+
+	"github.com/AliKefall/prothea/internal/metrics"
 )
 
 type inbound struct {
@@ -26,6 +28,8 @@ type Hub struct {
 	events map[EventType]EventHandler
 
 	active atomic.Int64
+
+	metrics *metrics.Metrics
 
 	// Careful not to bloat these functions they can be used for online, offline
 	// triggers too.
@@ -71,6 +75,9 @@ func (h *Hub) registerClient(
 
 	handler := h.onUserConnected
 
+	h.metrics.IncWSConnections()
+	h.metrics.ObserveWSConnection("connected")
+
 	h.mu.Unlock()
 
 	if wasOffline && handler != nil {
@@ -94,6 +101,9 @@ func (h *Hub) unregisterClient(
 	stillConnected := h.hasUserConnectionLocked(client.UserID)
 
 	handler := h.onUserDisconnected
+
+	h.metrics.DecWSConnections()
+	h.metrics.ObserveWSConnection("disconnected")
 
 	h.mu.Unlock()
 
@@ -160,6 +170,12 @@ func (h *Hub) SetUserLifecycleHandler(
 
 	h.onUserConnected = onConnected
 	h.onUserDisconnected = onDisconnected
+}
+
+func (h *Hub) SetMetrics(m *metrics.Metrics) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.metrics = m
 }
 
 func (h *Hub) hasUserConnectionLocked(userID string) bool {

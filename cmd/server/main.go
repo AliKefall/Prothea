@@ -12,7 +12,6 @@ import (
 	"github.com/AliKefall/prothea/internal/game"
 	"github.com/AliKefall/prothea/internal/matchmaking"
 	"github.com/joho/godotenv"
-	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -61,9 +60,9 @@ func main() {
 			deps.redis,
 		),
 		DisconnectStore: disconnectStore,
-		Hub:          deps.hub,
-		PollInterval: game.DefaultTimeoutPollInterval,
-		BatchSize:    game.DefaultTimeoutBatchSize,
+		Hub:             deps.hub,
+		PollInterval:    game.DefaultTimeoutPollInterval,
+		BatchSize:       game.DefaultTimeoutBatchSize,
 	}
 
 	go gameTimeOutWorker.Run(ctx)
@@ -77,12 +76,12 @@ func main() {
 		}
 	}()
 
-	serverShutdown(server, deps.redis)
+	serverShutdown(server)
 
 	cancel()
 }
 
-func serverShutdown(srv *http.Server, redisClient *redis.Client) {
+func serverShutdown(srv *http.Server) {
 	stop := make(chan os.Signal, 1)
 
 	signal.Notify(
@@ -100,12 +99,6 @@ func serverShutdown(srv *http.Server, redisClient *redis.Client) {
 		5*time.Second,
 	)
 	defer cancel()
-
-	if err := redisClient.FlushDB(ctx).Err(); err != nil {
-		log.Printf("redis cleanup failed: %v", err)
-	} else {
-		log.Println("redis database cleaned")
-	}
 
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("Shutdown error: %v", err)
