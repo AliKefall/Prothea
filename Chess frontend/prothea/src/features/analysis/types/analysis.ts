@@ -19,3 +19,8 @@ export type AnalysisResult = {
   moves: EngineMove[];
   depth: number;
 };
+
+export type OpeningResult = {
+    opening: string;
+    moves: EngineMove[];
+};

@@ -26,7 +26,7 @@ import {
   INITIAL_FEN,
 } from "../lib/position";
 import { useStockfish } from "../hooks/use-stockfish";
-import type { AnalysisMove } from "../types/analysis";
+import type { AnalysisMove, OpeningResult } from "../types/analysis";
 import type { Square } from "chess.js";
 
 interface AnalysisChessboardProps {
@@ -122,6 +122,9 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     to: string;
     color: "w" | "b";
   } | null>(null);
+
+  const [opening, setOpening] = useState<OpeningResult | null>(null);
+
   const currentFen = useMemo(
     () =>
       moveNumber === 0
@@ -566,6 +569,7 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
                 className="mt-3 flex flex-wrap gap-2"
                 aria-label="Moves in alternative line"
               >
+                Opening
                 {variationMoves.map((move, index) => (
                   <li key={`${index}-${move.uci}`}>
                     <button
@@ -595,15 +599,24 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-semibold">Game moves</h2>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    Select a move to review that position.
-                  </p>
                 </div>
                 <span className="rounded-full bg-zinc-800 px-2.5 py-1 text-xs tabular-nums text-zinc-400">
                   {moves.length}
                 </span>
               </div>
             </div>
+            {opening?.opening && (
+              <div className="mx-4 my-3 rounded-lg border border-zinc-800 bg-zinc-900 px-5 py-2 text-center text-zinc-400">
+                <p>{opening.opening}</p>
+
+                <button
+                  type="button"
+                  className="cursor-pointer rounded-lg bg-zinc-900/10 px-3 py-2 text-xs font-medium text-zinc-400 hover:bg-sky-300/20"
+                >
+                  Go to opening
+                </button>
+              </div>
+            )}
             <div className="min-h-0 flex-1">
               <MoveHistory
                 moves={moves}
