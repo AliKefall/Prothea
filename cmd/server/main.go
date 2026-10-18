@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/AliKefall/prothea/internal/game"
 	"github.com/AliKefall/prothea/internal/matchmaking"
+	"github.com/AliKefall/prothea/internal/openings"
 	"github.com/joho/godotenv"
 )
 
@@ -18,6 +20,17 @@ func main() {
 	godotenv.Load()
 
 	config := NewServer()
+data, err := openings.GetOpenings()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, opening := range data {
+		fmt.Printf("ECO: %s\n", opening.Code)
+		fmt.Printf("Name: %s\n", opening.Name)
+		fmt.Printf("PGN:  %s\n", opening.PGN)
+		fmt.Println("-------------------------")
+	}
 
 	conn, deps := bootstrapServer(config)
 	defer conn.Close()
@@ -77,7 +90,6 @@ func main() {
 	}()
 
 	serverShutdown(server)
-
 	cancel()
 }
 

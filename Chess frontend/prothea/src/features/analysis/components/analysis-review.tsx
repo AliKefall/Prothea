@@ -26,7 +26,7 @@ import {
   INITIAL_FEN,
 } from "../lib/position";
 import { useStockfish } from "../hooks/use-stockfish";
-import type { AnalysisMove, OpeningResult } from "../types/analysis";
+import { Opening, type AnalysisMove } from "../types/analysis";
 import type { Square } from "chess.js";
 
 interface AnalysisChessboardProps {
@@ -123,7 +123,7 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     color: "w" | "b";
   } | null>(null);
 
-  const [opening, setOpening] = useState<OpeningResult | null>(null);
+  const [opening, setOpening] = useState<Opening | null>(null);
 
   const currentFen = useMemo(
     () =>
@@ -605,9 +605,9 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
                 </span>
               </div>
             </div>
-            {opening?.opening && (
+            {opening?.name && (
               <div className="mx-4 my-3 rounded-lg border border-zinc-800 bg-zinc-900 px-5 py-2 text-center text-zinc-400">
-                <p>{opening.opening}</p>
+                <p>{opening.name}</p>
 
                 <button
                   type="button"
