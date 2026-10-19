@@ -2,14 +2,17 @@ package validation
 
 import (
 	"errors"
+	"net/mail"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 var (
-	ErrInvalidEmail    = errors.New("Invalid email")
-	ErrInvalidUsername = errors.New("invalid username")
-	ErrWeakPassword    = errors.New("weak password")
+	ErrInvalidEmail    = errors.New("Enter a valid email address")
+	ErrInvalidUsername = errors.New("Username must be 3–32 characters and use letters, numbers, or single underscores between them")
+	ErrWeakPassword    = errors.New("Password must be 8–128 characters, include lowercase and uppercase letters, a number, and a symbol, contain no spaces, and not be commonly used")
 )
 
 func ValidateRegister(email, username, password string) error {
@@ -42,19 +45,10 @@ func IsValidEmail(email string) bool {
 	if len(email) < 5 || len(email) > 254 {
 		return false
 	}
-
-	at := false
-	dot := false
-
-	for _, r := range email {
-		if r == '@' {
-			at = true
-		}
-		if r == '.' && at {
-			dot = true
-		}
-	}
-	return at && dot
+	address, err := mail.ParseAddress(email)
+	separator := strings.LastIndexByte(email, '@')
+	lastDot := strings.LastIndexByte(email, '.')
+	return err == nil && address.Address == email && lastDot > separator+1 && len(email)-lastDot-1 >= 2
 }
 
 var usernameRegex = regexp.MustCompile(`^[a-zA-Z0-9]+(_[a-zA-Z0-9]+)*$`)
@@ -67,7 +61,7 @@ func IsValidUsername(username string) bool {
 }
 
 func IsCommonPassword(pw string) bool {
-	switch pw {
+	switch strings.ToLower(pw) {
 	case "password", "123456", "12345678", "qwerty":
 		return true
 	default:
@@ -76,7 +70,7 @@ func IsCommonPassword(pw string) bool {
 }
 
 func IsValidPassword(password string) bool {
-	if len(password) < 8 || len(password) > 128 {
+	if utf8.RuneCountInString(password) < 8 || utf8.RuneCountInString(password) > 128 {
 		return false
 	}
 
@@ -95,7 +89,7 @@ func IsValidPassword(password string) bool {
 			hasUpper = true
 		case r >= '0' && r <= '9':
 			hasNumber = true
-		case r == ' ':
+		case unicode.IsSpace(r):
 			return false
 		default:
 			hasSpecial = true

@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowPathIcon,
-  ExclamationTriangleIcon,
   StarIcon,
 } from "@heroicons/react/24/solid";
 import {
@@ -18,7 +17,9 @@ import { useAuthStore } from "@/features/auth/auth-store";
 import { MoveHistory } from "@/features/chess/components/move-history";
 import { useMatch } from "@/features/chess/hooks/use-match";
 import { useMatchMoves } from "@/features/chess/hooks/use-match-moves";
+import { useMatchOpening } from "@/features/chess/hooks/use-match-opening";
 import { PromotionPicker } from "@/features/chess/components/promotion-picker";
+import { AnalysisSymbolInfo } from "./analysis-symbol-info";
 import {
   applyMove,
   createMove,
@@ -26,7 +27,7 @@ import {
   INITIAL_FEN,
 } from "../lib/position";
 import { useStockfish } from "../hooks/use-stockfish";
-import { Opening, type AnalysisMove } from "../types/analysis";
+import type { AnalysisMove, EngineMove } from "../types/analysis";
 import type { Square } from "chess.js";
 
 interface AnalysisChessboardProps {
@@ -35,9 +36,40 @@ interface AnalysisChessboardProps {
   arrows: Arrow[];
   squareStyles: Record<string, React.CSSProperties>;
   bestFrom?: string;
-  lowerRankedFrom?: string;
+  qualitySquare?: string;
+  quality?: "inaccuracy" | "mistake" | "blunder";
   onSquareClick: ({ square }: { square: string }) => void;
   onPieceDrop: (args: PieceDropHandlerArgs) => boolean;
+}
+
+const EMPTY_ARROWS: Arrow[] = [];
+
+type MoveQuality = "best" | "good" | "inaccuracy" | "mistake" | "blunder";
+
+function moveScore(move: EngineMove | undefined): number | null {
+  if (!move) return null;
+  if (move.mate !== undefined) {
+    return Math.sign(move.mate) * (1000 - Math.min(Math.abs(move.mate), 999));
+  }
+  return move.evaluation;
+}
+
+function classifyMove(
+  playedUci: string,
+  bestBefore: EngineMove | undefined,
+  bestAfter: EngineMove | undefined,
+  whiteMoved: boolean,
+): MoveQuality | null {
+  if (bestBefore?.uci.toLowerCase() === playedUci.toLowerCase()) return "best";
+  const before = moveScore(bestBefore);
+  const after = moveScore(bestAfter);
+  if (before === null || after === null) return null;
+
+  const lostAdvantage = whiteMoved ? before - after : after - before;
+  if (lostAdvantage <= 0.15) return "good";
+  if (lostAdvantage <= 0.75) return "inaccuracy";
+  if (lostAdvantage <= 1.5) return "mistake";
+  return "blunder";
 }
 
 const AnalysisChessboard = memo(function AnalysisChessboard({
@@ -46,7 +78,8 @@ const AnalysisChessboard = memo(function AnalysisChessboard({
   arrows,
   squareStyles,
   bestFrom,
-  lowerRankedFrom,
+  qualitySquare,
+  quality,
   onSquareClick,
   onPieceDrop,
 }: AnalysisChessboardProps) {
@@ -77,12 +110,12 @@ const AnalysisChessboard = memo(function AnalysisChessboard({
               <StarIcon className="h-3 w-3" />
             </span>
           )}
-          {lowerRankedFrom === square && (
+          {qualitySquare === square && quality && (
             <span
-              title="Lowest ranked of the top three"
-              className="absolute right-0.5 top-0.5 z-10 grid h-5 w-5 place-items-center rounded-full bg-rose-400 text-rose-950 shadow"
+              title={`Move quality: ${quality}`}
+              className={`absolute bottom-0.5 right-0.5 z-10 grid h-5 w-5 place-items-center rounded-full text-[10px] font-black shadow ${quality === "inaccuracy" ? "bg-amber-300 text-amber-950" : quality === "mistake" ? "bg-orange-400 text-orange-950" : "bg-rose-400 text-rose-950"}`}
             >
-              <ExclamationTriangleIcon className="h-3 w-3" />
+              ?
             </span>
           )}
         </div>
@@ -96,15 +129,27 @@ const AnalysisChessboard = memo(function AnalysisChessboard({
       squareStyles,
       onSquareClick,
       bestFrom,
-      lowerRankedFrom,
+      qualitySquare,
+      quality,
       onPieceDrop,
     ],
   );
 
-  return <Chessboard options={options} />;
+  return (
+    <div className="h-full w-full" data-component="analysis-chessboard">
+      <Chessboard options={options} />
+    </div>
+  );
 });
 
 export function AnalysisReview({ matchId }: { matchId: string }) {
+  type QualityRequest = {
+    beforeFen: string;
+    afterFen: string;
+    playedUci: string;
+    phase: "before" | "after";
+    bestBefore?: EngineMove;
+  };
   const user = useAuthStore((state) => state.user);
   const {
     data: match,
@@ -122,8 +167,12 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     to: string;
     color: "w" | "b";
   } | null>(null);
-
-  const [opening, setOpening] = useState<Opening | null>(null);
+  const [playedMoveQuality, setPlayedMoveQuality] = useState<{
+    ply: number;
+    quality: MoveQuality;
+  } | null>(null);
+  const qualityRequestRef = useRef<QualityRequest | null>(null);
+  const qualityCacheRef = useRef(new Map<string, MoveQuality>());
 
   const currentFen = useMemo(
     () =>
@@ -141,6 +190,15 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     [currentFen, variationMoves],
   );
   const displayedFen = variationFen ?? currentFen;
+  const openingMoves = useMemo(
+    () => [
+      ...moves.slice(0, moveNumber).map((move) => move.san),
+      ...variationMoves.map((move) => move.san),
+    ],
+    [moveNumber, moves, variationMoves],
+  );
+  const { data: openingAnalysis } = useMatchOpening(matchId, openingMoves);
+  const opening = openingAnalysis?.opening;
   const isWhite = match && user ? match.white_id === user.user_id : true;
   const positionGame = useMemo(
     () => createPosition(displayedFen),
@@ -150,8 +208,56 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
 
   useEffect(() => {
     if (!match || match.result === "pending" || !user) return;
+    const qualityKey = `${matchId}:${moveNumber}:${moves[moveNumber - 1]?.uci ?? ""}:${displayedFen}`;
+    const cachedQuality = qualityCacheRef.current.get(qualityKey);
+    setPlayedMoveQuality(
+      cachedQuality ? { ply: moveNumber, quality: cachedQuality } : null,
+    );
+    if (variationMoves.length === 0 && moveNumber > 0) {
+      const playedMove = moves[moveNumber - 1];
+      if (playedMove && !cachedQuality) {
+        const beforeFen =
+          moveNumber === 1
+            ? INITIAL_FEN
+            : (moves[moveNumber - 2]?.fen_after ?? INITIAL_FEN);
+        qualityRequestRef.current = {
+          beforeFen,
+          afterFen: displayedFen,
+          playedUci: playedMove.uci,
+          phase: "before",
+        };
+        analyze(beforeFen, { depth: 14, multiPv: 1 });
+        return;
+      }
+    }
+    qualityRequestRef.current = null;
     analyze(displayedFen, { depth: 14, multiPv: 3 });
-  }, [analyze, displayedFen, match, user]);
+  }, [analyze, currentFen, displayedFen, match, matchId, moveNumber, moves, user, variationMoves.length]);
+
+  useEffect(() => {
+    const request = qualityRequestRef.current;
+    if (!request || isAnalyzing || !result) return;
+    if (request.phase === "before" && result.fen === request.beforeFen) {
+      request.bestBefore = result.moves[0];
+      request.phase = "after";
+      analyze(request.afterFen, { depth: 14, multiPv: 1 });
+      return;
+    }
+    if (request.phase !== "after" || result.fen !== request.afterFen) return;
+
+    const quality = classifyMove(
+      request.playedUci,
+      request.bestBefore,
+      result.moves[0],
+      moveNumber % 2 === 1,
+    );
+    if (quality) {
+      const qualityKey = `${matchId}:${moveNumber}:${request.playedUci}:${request.afterFen}`;
+      qualityCacheRef.current.set(qualityKey, quality);
+      setPlayedMoveQuality({ ply: moveNumber, quality });
+    }
+    qualityRequestRef.current = null;
+  }, [analyze, isAnalyzing, matchId, moveNumber, result]);
 
   const handleVariationMove = useCallback(
     (sourceSquare: string, targetSquare: string | null) => {
@@ -290,7 +396,19 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
   // Tahta okları/rozetleri sadece güncel ve tamamlanmış sonuçla
   const boardBestMoves = fresh && result ? result.moves.slice(0, 3) : [];
   const bestFrom = boardBestMoves[0]?.uci.slice(0, 2);
-  const lowerRankedFrom = boardBestMoves[2]?.uci.slice(0, 2);
+  const visibleMoveQuality =
+    variationMoves.length === 0 && playedMoveQuality?.ply === moveNumber
+      ? playedMoveQuality.quality
+      : undefined;
+  const visibleProblemQuality =
+    visibleMoveQuality === "inaccuracy" ||
+    visibleMoveQuality === "mistake" ||
+    visibleMoveQuality === "blunder"
+      ? visibleMoveQuality
+      : undefined;
+  const qualitySquare = visibleProblemQuality
+    ? moves[moveNumber - 1]?.uci.slice(2, 4)
+    : undefined;
   const arrows = useMemo<Arrow[]>(() => {
     const move = fresh ? result?.moves[0]?.uci : undefined;
     return showBestMoveArrow && move
@@ -301,19 +419,19 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
             color: "#38bdf8",
           },
         ]
-      : [];
+      : EMPTY_ARROWS;
   }, [fresh, result, showBestMoveArrow]);
 
   if (matchLoading || movesLoading) {
     return (
-      <div className="py-16 text-center text-sm text-zinc-400">
+      <div className="py-16 text-center text-sm text-zinc-400" data-component="analysis-loading-state">
         Loading game…
       </div>
     );
   }
   if (matchError || !match || !user || match.result === "pending") {
     return (
-      <div className="mx-auto max-w-lg rounded-xl border border-zinc-800 bg-zinc-900 p-6 text-center text-white">
+      <div className="mx-auto max-w-lg rounded-xl border border-zinc-800 bg-zinc-900 p-6 text-center text-white" data-component="analysis-unavailable-state">
         <p className="font-semibold">
           This game is not available for analysis.
         </p>
@@ -346,9 +464,23 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     selectMove(Math.max(0, moveNumber - 1));
   };
 
+  const openOpeningPosition = () => {
+    if (!openingAnalysis) return;
+    const targetPly = openingAnalysis.exit_ply ?? openingAnalysis.matched_plies;
+    setPromotionRequest(null);
+    setSelectedSquare(null);
+    if (targetPly <= moveNumber) {
+      selectMove(targetPly);
+      return;
+    }
+    setVariationMoves((current) =>
+      current.slice(0, targetPly - moveNumber),
+    );
+  };
+
   return (
-    <main className="mx-auto w-full max-w-6xl text-white">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+    <main className="mx-auto w-full max-w-6xl text-white" data-component="analysis-review">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3" data-component="analysis-header">
         <div>
           <Link
             href="/dashboard/analysis"
@@ -365,10 +497,11 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
         <p
           aria-live="polite"
           className="w-56 truncate text-right text-sm tabular-nums text-zinc-400"
+          data-component="analysis-status"
         >
           {error ??
             (isAnalyzing
-              ? `Evaluating position${result?.moves[0] ? ` · depth ${result.depth}` : "…"}`
+              ? "Evaluating position…"
               : bestMove
                 ? "Position evaluated"
                 : "Evaluation unavailable")}
@@ -378,6 +511,7 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
       <section
         aria-label="Rating changes"
         className="mb-6 grid gap-3 rounded-xl border border-zinc-800 bg-zinc-900 p-4 text-sm sm:grid-cols-2"
+        data-component="rating-changes"
       >
         <RatingChange
           username={match.white_username}
@@ -393,9 +527,9 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
         />
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <section>
-          <div className="mx-auto mb-3 flex w-full max-w-3xl flex-wrap items-center justify-between gap-2">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]" data-component="analysis-workspace">
+        <section data-component="analysis-board-panel">
+          <div className="mx-auto mb-3 flex w-full max-w-3xl flex-wrap items-center justify-between gap-2" data-component="analysis-board-controls">
             <div className="flex min-h-7 flex-wrap items-center gap-2 text-xs text-zinc-400">
               {checkedKingSquare && (
                 <span className="rounded-full border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-red-300">
@@ -403,17 +537,7 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
                 </span>
               )}
               {selectedSquare && <span>Legal moves highlighted</span>}
-              {fresh && boardBestMoves[0] && (
-                <span className="inline-flex items-center gap-1 text-emerald-300">
-                  <StarIcon className="h-3.5 w-3.5" /> Best line
-                </span>
-              )}
-              {fresh && boardBestMoves[2] && (
-                <span className="inline-flex items-center gap-1 text-rose-300">
-                  <ExclamationTriangleIcon className="h-3.5 w-3.5" /> Lowest of
-                  top 3
-                </span>
-              )}
+              <AnalysisSymbolInfo />
             </div>
             <div className="flex gap-2">
               <button
@@ -439,42 +563,43 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
               </button>
             </div>
           </div>
-          <div className="mx-auto grid w-full max-w-3xl grid-cols-[1rem_minmax(0,1fr)] items-stretch gap-3">
+          <div className="mx-auto grid w-full max-w-3xl grid-cols-[1rem_minmax(0,1fr)] items-stretch gap-3" data-component="analysis-evaluation-and-board">
             <EvaluationBar move={bestMove} whiteAtBottom={isWhite} />
-            <div className="relative aspect-square w-full min-w-0 overflow-hidden rounded-lg shadow-xl">
+            <div className="relative aspect-square w-full min-w-0 overflow-hidden rounded-lg shadow-xl" data-component="analysis-board-frame">
               <AnalysisChessboard
                 position={displayedFen}
                 boardOrientation={boardOrientation}
                 arrows={arrows}
                 squareStyles={squareStyles}
                 bestFrom={bestFrom}
-                lowerRankedFrom={
-                  lowerRankedFrom !== bestFrom ? lowerRankedFrom : undefined
-                }
+                qualitySquare={qualitySquare}
+                quality={visibleProblemQuality}
                 onSquareClick={handleBoardSquareClick}
                 onPieceDrop={handlePieceDrop}
               />
               {promotionRequest && (
-                <PromotionPicker
-                  color={promotionRequest.color}
-                  onSelectAction={(promotion) => {
-                    const move = createMove(
-                      displayedFen,
-                      promotionRequest.from,
-                      promotionRequest.to,
-                      promotion,
-                    );
-                    if (move)
-                      setVariationMoves((current) => [...current, move]);
-                    setPromotionRequest(null);
-                  }}
-                  onCancelAction={() => setPromotionRequest(null)}
-                />
+                <div data-component="analysis-promotion-picker">
+                  <PromotionPicker
+                    color={promotionRequest.color}
+                    onSelectAction={(promotion) => {
+                      const move = createMove(
+                        displayedFen,
+                        promotionRequest.from,
+                        promotionRequest.to,
+                        promotion,
+                      );
+                      if (move)
+                        setVariationMoves((current) => [...current, move]);
+                      setPromotionRequest(null);
+                    }}
+                    onCancelAction={() => setPromotionRequest(null)}
+                  />
+                </div>
               )}
             </div>
           </div>
-          <div className="mx-auto mt-4 flex w-full max-w-3xl items-center justify-between gap-3">
-            <div className="min-w-0 flex-1 text-sm text-zinc-400">
+          <div className="mx-auto mt-4 flex w-full max-w-3xl items-center justify-between gap-3" data-component="analysis-move-navigation">
+            <div className="min-w-0 flex-1 text-sm text-zinc-400" data-component="analysis-position-summary">
               <p className="truncate">
                 {variationMoves.length > 0
                   ? `Exploring: ${variationMoves.map((move) => move.san).join(" ")}`
@@ -538,6 +663,7 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
             <section
               aria-label="Alternative line"
               className="mx-auto mt-4 w-full max-w-3xl rounded-xl border border-sky-400/20 bg-sky-400/5 p-4"
+              data-component="analysis-alternative-route"
             >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -569,7 +695,6 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
                 className="mt-3 flex flex-wrap gap-2"
                 aria-label="Moves in alternative line"
               >
-                Opening
                 {variationMoves.map((move, index) => (
                   <li key={`${index}-${move.uci}`}>
                     <button
@@ -593,8 +718,8 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
           )}
         </section>
 
-        <aside className="flex h-[80vh] min-h-128 max-h-208 flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900">
-          <section className="flex min-h-0 flex-1 flex-col">
+        <aside className="flex h-[80vh] min-h-128 max-h-208 flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900" data-component="analysis-sidebar">
+          <section className="flex min-h-0 flex-1 flex-col" data-component="analysis-move-history-panel">
             <div className="shrink-0 border-b border-zinc-800 px-5 py-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -605,19 +730,28 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
                 </span>
               </div>
             </div>
-            {opening?.name && (
-              <div className="mx-4 my-3 rounded-lg border border-zinc-800 bg-zinc-900 px-5 py-2 text-center text-zinc-400">
-                <p>{opening.name}</p>
-
-                <button
-                  type="button"
-                  className="cursor-pointer rounded-lg bg-zinc-900/10 px-3 py-2 text-xs font-medium text-zinc-400 hover:bg-sky-300/20"
-                >
-                  Go to opening
-                </button>
+            {openingAnalysis && openingAnalysis.total_plies > 0 && (
+              <div className="mx-4 my-3 rounded-xl border border-sky-400/15 bg-gradient-to-br from-sky-400/6 to-zinc-900 px-4 py-3 text-zinc-400" data-component="opening-summary">
+                <p className="text-sm font-semibold text-zinc-100">
+                  {opening?.name ?? "Unclassified opening line"}
+                </p>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <p className="min-w-0 text-xs text-zinc-400">
+                    {openingAnalysis.exit_ply
+                      ? `Left book at ${Math.ceil(openingAnalysis.exit_ply / 2)}.${openingAnalysis.exit_ply % 2 === 1 ? "" : "…"} ${openingAnalysis.exit_move}`
+                      : `In book through ${openingAnalysis.matched_plies} plies`}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={openOpeningPosition}
+                    className="shrink-0 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs font-medium text-zinc-200 transition hover:border-sky-300/40 hover:bg-sky-300/10"
+                  >
+                    {openingAnalysis.exit_ply ? "View exit" : "View line"}
+                  </button>
+                </div>
               </div>
             )}
-            <div className="min-h-0 flex-1">
+            <div className="min-h-0 flex-1" data-component="analysis-move-history">
               <MoveHistory
                 moves={moves}
                 isLoading={false}
@@ -630,12 +764,10 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
           <section
             aria-label="Best three moves"
             className="h-52 shrink-0 border-t border-zinc-800 px-5 py-4"
+            data-component="engine-suggestions"
           >
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold">Best moves</h2>
-              <span className="text-xs tabular-nums text-zinc-500">
-                Stockfish · depth {result ? result.depth : "—"}
-              </span>
+              <h2 className="text-sm font-semibold">Engine suggestions</h2>
             </div>
             <div
               className={`mt-3 space-y-2 transition-opacity duration-200 ${isStale || isAnalyzing ? "opacity-60" : "opacity-100"}`}
@@ -689,7 +821,7 @@ function RatingChange({
         ? "text-emerald-400"
         : "text-rose-400";
   return (
-    <div className="flex items-center justify-between gap-3">
+    <div className="flex items-center justify-between gap-3" data-component="rating-change" data-player-color={color.toLowerCase()}>
       <span className="text-zinc-400">
         {color} · {username}
       </span>
@@ -738,6 +870,7 @@ function EvaluationBar({
     <div
       className="flex shrink-0 flex-col items-center gap-2"
       aria-label={"Position evaluation: " + label}
+      data-component="analysis-evaluation-bar"
     >
       <div
         className="relative h-full min-h-0 w-4 overflow-hidden rounded-full border border-zinc-700 bg-zinc-950"

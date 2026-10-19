@@ -7,5 +7,5 @@ interface Props {
 export function FormError({ message }: Props) {
   if (!message) return null;
 
-  return <p className="text-sm text-red-500">{message}</p>;
+  return <p role="alert" aria-live="polite" className="text-sm text-red-400">{message}</p>;
 }

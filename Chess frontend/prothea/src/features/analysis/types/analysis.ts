@@ -19,8 +19,3 @@ export type AnalysisResult = {
   moves: EngineMove[];
   depth: number;
 };
-
-export type Opening = {
-    name: string;
-    pgn: string;
-}

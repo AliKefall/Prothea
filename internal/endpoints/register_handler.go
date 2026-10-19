@@ -26,12 +26,13 @@ func (deps *Deps) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 
 	var req RegisterRequest
 
-	if err := utils.DecodeJSON(
+	if err := utils.DecodeJSONWithLimit(
 		w,
 		r,
 		&req,
+		16<<10,
 	); err != nil {
-		utils.RespondWithError(w, http.StatusInternalServerError, "json_error", "Could not parse json", "", err)
+		utils.RespondWithError(w, http.StatusBadRequest, "json_error", "Request must contain a valid registration object", "", err)
 		return
 	}
 
@@ -40,7 +41,7 @@ func (deps *Deps) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 
 	err := validation.ValidateRegister(req.Email, req.Username, req.Password)
 	if err != nil {
-		utils.RespondWithError(w, http.StatusBadRequest, "validation_error", "Broken parameters for register", "", err)
+		utils.RespondWithError(w, http.StatusBadRequest, "validation_error", err.Error(), "", nil)
 		return
 	}
 
@@ -86,9 +87,12 @@ func (deps *Deps) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 
 				default:
 					utils.RespondWithError(w, http.StatusConflict, "conflict_error", "User already exists", "", nil)
+					return
 				}
 			}
 		}
+		utils.RespondWithError(w, http.StatusInternalServerError, "register_error", "Could not create account", "", err)
+		return
 	}
 
 	err = tsx.CreatePlayerRatings(ctx, userID)

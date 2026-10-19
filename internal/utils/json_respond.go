@@ -107,6 +107,15 @@ func DecodeJSON(
 	r *http.Request,
 	dst any,
 ) error {
+	return DecodeJSONWithLimit(w, r, dst, DefaultMaxBodySize)
+}
+
+func DecodeJSONWithLimit(
+	w http.ResponseWriter,
+	r *http.Request,
+	dst any,
+	maxBodySize int64,
+) error {
 
 	if r.Body == nil {
 		return errors.New("request body is empty")
@@ -128,7 +137,7 @@ func DecodeJSON(
 	r.Body = http.MaxBytesReader(
 		w,
 		r.Body,
-		DefaultMaxBodySize,
+		maxBodySize,
 	)
 
 	defer r.Body.Close()

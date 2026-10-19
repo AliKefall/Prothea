@@ -23,3 +23,8 @@ export interface LoginResponse {
   access_token: string;
   user: User;
 }
+
+export interface RefreshResponse {
+  access_token: string;
+  user: User;
+}

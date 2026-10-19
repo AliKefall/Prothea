@@ -14,6 +14,7 @@ import (
 	"github.com/AliKefall/prothea/internal/friends"
 	"github.com/AliKefall/prothea/internal/game"
 	"github.com/AliKefall/prothea/internal/matchmaking"
+	"github.com/AliKefall/prothea/internal/openings"
 	"github.com/AliKefall/prothea/internal/websocket"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/redis/go-redis/v9"
@@ -37,6 +38,11 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 	matchmakingService := configureMatchmaking(redisClient)
 	gameService := configureGame(conn, queries, redisClient)
 	friendsService := configureFriends(conn, queries, hub)
+	openingIndex := openings.NewWorker()
+	if err := openingIndex.SetOpenings(); err != nil {
+		log.Fatalf("opening database initialization failed: %v", err)
+	}
+	hub.Register(websocket.EventGetOpening, openingIndex.HandleWebSocketRequest)
 	configureGameEvents(hub, gameService)
 	configureUserLifecycle(hub, gameService, friendsService)
 

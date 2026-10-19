@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/AliKefall/prothea/internal/auth"
 	"github.com/AliKefall/prothea/internal/database"
@@ -26,7 +27,7 @@ func (deps *Deps) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	var req LoginRequest
 
-	if err := utils.DecodeJSON(w, r, &req); err != nil {
+	if err := utils.DecodeJSONWithLimit(w, r, &req, 16<<10); err != nil {
 		utils.RespondWithError(
 			w,
 			http.StatusBadRequest,
@@ -40,7 +41,7 @@ func (deps *Deps) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 
-	if req.Email == "" || req.Password == "" {
+	if req.Email == "" || req.Password == "" || len(req.Email) > 254 || utf8.RuneCountInString(req.Password) > 128 || len(req.Password) > 512 {
 		utils.RespondWithError(
 			w,
 			http.StatusBadRequest,
@@ -55,6 +56,10 @@ func (deps *Deps) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	user, err := deps.Queries.GetUserByEmail(ctx, req.Email)
 	if err != nil {
 		if err == sql.ErrNoRows {
+			if verifyErr := deps.Hasher.VerifyUnknownUser(req.Password); verifyErr != nil {
+				utils.RespondWithError(w, http.StatusInternalServerError, "auth_error", "Failed to verify credentials", "", verifyErr)
+				return
+			}
 			utils.RespondWithError(
 				w,
 				http.StatusUnauthorized,

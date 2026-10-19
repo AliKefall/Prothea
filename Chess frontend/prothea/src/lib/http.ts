@@ -3,6 +3,7 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
 
 import { useAuthStore } from "@/features/auth/auth-store";
+import type { RefreshResponse } from "@/features/auth/api/auth.types";
 
 type ApiErrorBody = {
   error?: {
@@ -54,6 +55,20 @@ const refreshClient = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
 });
+
+let refreshPromise: Promise<RefreshResponse> | null = null;
+
+export function refreshSession(): Promise<RefreshResponse> {
+  if (!refreshPromise) {
+    refreshPromise = refreshClient
+      .post<RefreshResponse>("/auth/refresh")
+      .then((response) => response.data)
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+}
 
 
 /* Alos if refresh endpoints throws another race condition
@@ -162,19 +177,9 @@ http.interceptors.response.use(
     isRefreshing = true;
 
     try {
-      const response = await refreshClient.post<{
-        access_token: string;
-      }>("/auth/refresh");
-
-      const newAccessToken = response.data.access_token;
-
-      const currentUser = useAuthStore.getState().user;
-
-      if (!currentUser) {
-        throw new Error("No user in auth store");
-      }
-
-      useAuthStore.getState().setSession(newAccessToken, currentUser);
+      const refreshedSession = await refreshSession();
+      const newAccessToken = refreshedSession.access_token;
+      useAuthStore.getState().setSession(newAccessToken, refreshedSession.user);
 
       /*
        * Release all requests that were waiting for

@@ -5,7 +5,6 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/AliKefall/prothea/internal/endpoints"
@@ -23,22 +22,7 @@ import (
 func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 	router := chi.NewRouter()
 	router.Use(cors.Handler(cors.Options{
-		AllowedOrigins: config.AllowedOrigins,
-		AllowOriginFunc: func(r *http.Request, origin string) bool {
-			u, err := url.Parse(origin)
-			if err != nil {
-				return false
-			}
-			if (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1") && (u.Scheme == "http" || u.Scheme == "https") {
-				return true
-			}
-			for _, allowed := range config.AllowedOrigins {
-				if allowed == origin {
-					return true
-				}
-			}
-			return false
-		},
+		AllowedOrigins:   config.AllowedOrigins,
 		AllowedMethods:   []string{"GET", "OPTIONS", "POST", "DELETE", "PUT", "PATCH"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-Id"},
 		ExposedHeaders:   []string{"X-Request-Id"},
@@ -64,6 +48,10 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 		log.Fatalf("Ratelimiter init failed: %v", err)
 	}
 	router.Use(ratelimiter.MiddlewareRateLimiter(rateLimiter))
+	authRateLimiter, err := ratelimiter.NewRedisTokenBucketLimiter(deps.RedisClient, 5, 0.1)
+	if err != nil {
+		log.Fatalf("Authentication rate limiter init failed: %v", err)
+	}
 
 	router.With(deps.AuthMiddleware).Get("/ws", func(w http.ResponseWriter, r *http.Request) {
 		uid, ok := r.Context().Value(endpoints.UserIDKey).(uuid.UUID)
@@ -134,12 +122,33 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 
 	})
 	router.Route("/auth", func(ar chi.Router) {
+		ar.Use(ratelimiter.MiddlewareAuthRateLimiter(authRateLimiter))
+		ar.Use(authOriginMiddleware(config.AllowedOrigins))
 		ar.Post("/register", deps.RegisterHandler)
 		ar.Post("/login", deps.LoginHandler)
 		ar.Post("/refresh", deps.RefreshHandler)
 	})
 
 	return router
+}
+
+func authOriginMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
+	allowed := make(map[string]struct{}, len(allowedOrigins))
+	for _, origin := range allowedOrigins {
+		allowed[origin] = struct{}{}
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			_, originAllowed := allowed[origin]
+			crossSiteWithoutOrigin := origin == "" && r.Header.Get("Sec-Fetch-Site") == "cross-site"
+			if (origin != "" && !originAllowed) || crossSiteWithoutOrigin {
+				utils.RespondWithError(w, http.StatusForbidden, "origin_forbidden", "Request origin is not allowed", "", nil)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func securityHeaderMiddleware(next http.Handler) http.Handler {

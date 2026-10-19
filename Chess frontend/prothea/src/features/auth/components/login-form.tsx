@@ -6,6 +6,7 @@ import { useLogin } from "../hooks/use-login";
 import { loginSchema } from "../schemas/login-schema";
 
 import { useForm } from "react-hook-form";
+import { useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import {
@@ -23,6 +24,8 @@ import { Label } from "@/components/ui/label";
 import { FormError } from "@/components/form-error";
 
 import {
+  EyeIcon,
+  EyeSlashIcon,
   EnvelopeIcon,
   LockClosedIcon,
 } from "@heroicons/react/24/outline";
@@ -32,6 +35,7 @@ type FormData = z.infer<typeof loginSchema>;
 export function LoginForm() {
   const router = useRouter();
   const mutation = useLogin();
+  const [showPassword, setShowPassword] = useState(false);
 
   const form = useForm<FormData>({
     resolver: zodResolver(loginSchema),
@@ -62,7 +66,7 @@ export function LoginForm() {
       {/* Login Card */}
       <Card className="relative z-10 w-full max-w-lg border-zinc-700 bg-zinc-900/90 py-4 shadow-2xl backdrop-blur">
         {/* Header */}
-        <CardHeader className="space-y-4 px-10 pt-8 text-center">
+        <CardHeader className="space-y-4 px-6 pt-8 text-center sm:px-10">
           {/* Icon */}
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-zinc-600 bg-zinc-800">
             <LockClosedIcon className="h-7 w-7 text-zinc-100" />
@@ -85,7 +89,7 @@ export function LoginForm() {
         </CardHeader>
 
         {/* Form */}
-        <CardContent className="px-10 pb-10 pt-6">
+        <CardContent className="px-6 pb-8 pt-6 sm:px-10 sm:pb-10">
           <form
             onSubmit={form.handleSubmit(onSubmit)}
             className="space-y-6"
@@ -122,21 +126,12 @@ export function LoginForm() {
 
             {/* Password */}
             <div className="space-y-2.5">
-              <div className="flex items-center justify-between">
-                <Label
-                  htmlFor="password"
-                  className="text-base font-medium text-zinc-200"
-                >
-                  Password
-                </Label>
-
-                <button
-                  type="button"
-                  className="text-sm font-medium text-zinc-400 transition-colors hover:text-zinc-200"
-                >
-                  Forgot password?
-                </button>
-              </div>
+              <Label
+                htmlFor="password"
+                className="text-base font-medium text-zinc-200"
+              >
+                Password
+              </Label>
 
               <div className="relative">
                 <LockClosedIcon
@@ -146,12 +141,26 @@ export function LoginForm() {
 
                 <Input
                   id="password"
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   placeholder="Enter your password"
                   autoComplete="current-password"
-                  className="h-12 border-zinc-700 bg-zinc-950 pl-12 text-base text-zinc-100 placeholder:text-zinc-500 focus-visible:border-zinc-500"
+                  maxLength={128}
+                  className="h-12 border-zinc-700 bg-zinc-950 pl-12 pr-12 text-base text-zinc-100 placeholder:text-zinc-500 focus-visible:border-zinc-500"
                   {...form.register("password")}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-2 text-zinc-400 transition hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+                >
+                  {showPassword ? (
+                    <EyeSlashIcon className="h-5 w-5" aria-hidden="true" />
+                  ) : (
+                    <EyeIcon className="h-5 w-5" aria-hidden="true" />
+                  )}
+                </button>
               </div>
 
               <FormError
@@ -169,6 +178,8 @@ export function LoginForm() {
                 ? "Logging in..."
                 : "Sign in"}
             </Button>
+
+            <FormError message={mutation.error instanceof Error ? mutation.error.message : undefined} />
 
             {/* Divider */}
             <div className="flex items-center gap-5 py-1">

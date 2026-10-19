@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -18,11 +20,14 @@ const (
 )
 
 type PasswordHasher struct {
-	memory      uint32
-	time        uint32
-	parallelism uint8
-	keyLen      uint32
-	saltLen     uint32
+	memory        uint32
+	time          uint32
+	parallelism   uint8
+	keyLen        uint32
+	saltLen       uint32
+	dummyHashOnce sync.Once
+	dummyHash     string
+	dummyHashErr  error
 }
 
 func NewPasswordHasher() *PasswordHasher {
@@ -36,6 +41,9 @@ func NewPasswordHasher() *PasswordHasher {
 }
 
 func (p *PasswordHasher) Hash(password string) (string, error) {
+	if utf8.RuneCountInString(password) > 128 || len(password) > 512 {
+		return "", errors.New("password is too long")
+	}
 	salt := make([]byte, p.saltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
@@ -66,6 +74,9 @@ func (p *PasswordHasher) Hash(password string) (string, error) {
 }
 
 func (p *PasswordHasher) Verify(password, encoded string) (bool, error) {
+	if utf8.RuneCountInString(password) > 128 || len(password) > 512 {
+		return false, errors.New("password is too long")
+	}
 
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 5 {
@@ -93,8 +104,7 @@ func (p *PasswordHasher) Verify(password, encoded string) (bool, error) {
 	// params (STRICT PARSE)
 	params := strings.Split(parts[2], ",")
 
-	var memory, time uint32
-	var parallelism uint8
+	var memoryValue, timeValue, parallelismValue int
 
 	for _, param := range params {
 		kv := strings.Split(param, "=")
@@ -109,17 +119,22 @@ func (p *PasswordHasher) Verify(password, encoded string) (bool, error) {
 
 		switch kv[0] {
 		case "m":
-			memory = uint32(val)
+			memoryValue = val
 		case "t":
-			time = uint32(val)
+			timeValue = val
 		case "p":
-			parallelism = uint8(val)
+			parallelismValue = val
 		}
 	}
 
-	if memory == 0 || time == 0 || parallelism == 0 {
+	if parallelismValue < 1 || parallelismValue > 16 ||
+		memoryValue < 8*parallelismValue || memoryValue > 256*1024 ||
+		timeValue < 1 || timeValue > 10 {
 		return false, errors.New("invalid parsed parameters")
 	}
+	memory := uint32(memoryValue)
+	iterations := uint32(timeValue)
+	parallelism := uint8(parallelismValue)
 
 	salt, err := base64.RawStdEncoding.DecodeString(parts[3])
 	if err != nil {
@@ -130,11 +145,14 @@ func (p *PasswordHasher) Verify(password, encoded string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if len(salt) < 8 || len(salt) > 64 || len(expectedHash) != int(p.keyLen) {
+		return false, errors.New("invalid password hash size")
+	}
 
 	hash := argon2.IDKey(
 		[]byte(password),
 		salt,
-		time,
+		iterations,
 		memory,
 		parallelism,
 		p.keyLen,
@@ -145,4 +163,25 @@ func (p *PasswordHasher) Verify(password, encoded string) (bool, error) {
 	}
 
 	return false, nil
+}
+
+func (p *PasswordHasher) VerifyUnknownUser(password string) error {
+	initialized := false
+	p.dummyHashOnce.Do(func() {
+		initialized = true
+		secret := make([]byte, 32)
+		if _, err := rand.Read(secret); err != nil {
+			p.dummyHashErr = err
+			return
+		}
+		p.dummyHash, p.dummyHashErr = p.Hash(base64.RawStdEncoding.EncodeToString(secret))
+	})
+	if p.dummyHashErr != nil {
+		return p.dummyHashErr
+	}
+	if initialized {
+		return nil
+	}
+	_, err := p.Verify(password, p.dummyHash)
+	return err
 }

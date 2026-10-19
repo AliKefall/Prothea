@@ -11,7 +11,6 @@ type AuthState = {
   hydrate: () => void;
 };
 
-const ACCESS_KEY = "access_token";
 const USER_KEY = "user";
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -20,8 +19,15 @@ export const useAuthStore = create<AuthState>((set) => ({
   hydrated: false,
 
   setSession: (token, user) => {
-    localStorage.setItem(ACCESS_KEY, token);
-    localStorage.setItem(USER_KEY, JSON.stringify(user));
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(USER_KEY, JSON.stringify(user));
+        // Remove tokens written by older app versions; access tokens stay in memory.
+        localStorage.removeItem("access_token");
+      } catch {
+        // The in-memory session still works when browser storage is unavailable.
+      }
+    }
 
     set({
       accessToken: token,
@@ -30,8 +36,14 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   clearSession: () => {
-    localStorage.removeItem(ACCESS_KEY);
-    localStorage.removeItem(USER_KEY);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.removeItem("access_token");
+        localStorage.removeItem(USER_KEY);
+      } catch {
+        // The in-memory session is cleared even if browser storage is unavailable.
+      }
+    }
 
     set({
       accessToken: null,
@@ -40,12 +52,38 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   hydrate: () => {
-    const token = localStorage.getItem(ACCESS_KEY);
-    const user = localStorage.getItem(USER_KEY);
+    let user: User | null = null;
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem(USER_KEY);
+        const parsed: unknown = stored ? JSON.parse(stored) : null;
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          "user_id" in parsed && typeof parsed.user_id === "string" &&
+          "username" in parsed && typeof parsed.username === "string" &&
+          "email" in parsed && typeof parsed.email === "string"
+        ) {
+          user = parsed as User;
+        }
+      } catch {
+        user = null;
+        try {
+          localStorage.removeItem(USER_KEY);
+        } catch {
+          // Ignore unavailable browser storage.
+        }
+      }
+      try {
+        localStorage.removeItem("access_token");
+      } catch {
+        // Ignore unavailable browser storage.
+      }
+    }
 
     set({
-      accessToken: token,
-      user: user ? JSON.parse(user) : null,
+      accessToken: null,
+      user,
       hydrated: true,
     });
   },

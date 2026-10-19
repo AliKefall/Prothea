@@ -21,8 +21,6 @@ func (deps *Deps) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	now := time.Now()
-
 	cookie, err := r.Cookie("refresh_token")
 	if err != nil {
 		utils.RespondWithError(
@@ -116,6 +114,7 @@ func (deps *Deps) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
+	now := time.Now()
 
 	if session.RevokedAt.Valid {
 		clearRefreshToken(w, r)
@@ -131,7 +130,7 @@ func (deps *Deps) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if now.After(session.MaxExpiresAt) {
+	if !now.Before(session.ExpiresAt) || !now.Before(session.MaxExpiresAt) {
 		clearRefreshToken(w, r)
 
 		utils.RespondWithError(
@@ -186,6 +185,9 @@ func (deps *Deps) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 
 	refreshTTL := 7 * 24 * time.Hour
 	newExpires := now.Add(refreshTTL)
+	if newExpires.After(session.MaxExpiresAt) {
+		newExpires = session.MaxExpiresAt
+	}
 
 	_, err = qtx.CreateSession(
 		ctx,
@@ -231,6 +233,11 @@ func (deps *Deps) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 			"",
 			err,
 		)
+		return
+	}
+	user, err := qtx.GetUserByID(ctx, session.UserID)
+	if err != nil {
+		utils.RespondWithError(w, http.StatusInternalServerError, "user_error", "Could not load account", "", err)
 		return
 	}
 
@@ -291,13 +298,19 @@ func (deps *Deps) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		Path:     "/",
 		Expires:  newExpires,
+		MaxAge:   int(time.Until(newExpires).Seconds()),
 	})
 
 	utils.RespondWithJSON(
 		w,
 		http.StatusOK,
-		map[string]string{
+		map[string]any{
 			"access_token": accessToken,
+			"user": map[string]string{
+				"user_id":  user.ID.String(),
+				"username": user.Username,
+				"email":    user.Email,
+			},
 		},
 	)
 }

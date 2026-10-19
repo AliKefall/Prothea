@@ -1,7 +1,7 @@
 "use client";
 
 // FIX #3: removed unused `useRef` import
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Chess, type Square } from "chess.js";
 import { Chessboard, type PieceDropHandlerArgs } from "react-chessboard";
 import { useQueryClient } from "@tanstack/react-query";
@@ -127,11 +127,15 @@ const StableGameChessboard = memo(function StableGameChessboard({
   position,
   boardOrientation,
   allowDragging,
+  squareStyles,
+  onSquareClick,
   onPieceDrop,
 }: {
   position: string;
   boardOrientation: "white" | "black";
   allowDragging: boolean;
+  squareStyles: Record<string, CSSProperties>;
+  onSquareClick: (args: { square: string }) => void;
   onPieceDrop: (args: PieceDropHandlerArgs) => boolean;
 }) {
   const checkedKingSquare = useMemo(() => {
@@ -145,17 +149,20 @@ const StableGameChessboard = memo(function StableGameChessboard({
           piece?.type === "k" && piece.color === currentPosition.turn(),
       )?.square;
   }, [position]);
-  const squareStyles = useMemo(
-    () =>
-      checkedKingSquare
+  const mergedSquareStyles = useMemo(
+    () => ({
+      ...squareStyles,
+      ...(checkedKingSquare
         ? {
             [checkedKingSquare]: {
+              ...squareStyles[checkedKingSquare],
               background: "rgba(239, 68, 68, 0.62)",
               boxShadow: "inset 0 0 0 4px rgba(127, 29, 29, 0.9)",
             },
           }
-        : {},
-    [checkedKingSquare],
+        : {}),
+    }),
+    [checkedKingSquare, squareStyles],
   );
 
   return (
@@ -165,7 +172,8 @@ const StableGameChessboard = memo(function StableGameChessboard({
         boardOrientation,
         allowDragging,
         onPieceDrop,
-        squareStyles,
+        onSquareClick,
+        squareStyles: mergedSquareStyles,
       }}
     />
   );
@@ -214,6 +222,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
   const [selectedMoveNumber, setSelectedMoveNumber] = useState<number | null>(
     null,
   );
+  const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
 
   const moves = useMemo<GameMove[]>(() => {
     const merged = new Map<number, GameMove>();
@@ -274,6 +283,38 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
   const game = useMemo(() => {
     return new Chess(livePosition);
   }, [livePosition]);
+
+  const legalTargets = useMemo(
+    () =>
+      selectedSquare
+        ? game.moves({ square: selectedSquare, verbose: true }).map((move) => move.to)
+        : [],
+    [game, selectedSquare],
+  );
+  const legalMoveStyles = useMemo<Record<string, CSSProperties>>(() => {
+    const styles: Record<string, CSSProperties> = {};
+    if (selectedSquare) {
+      styles[selectedSquare] = {
+        boxShadow: "inset 0 0 0 4px rgba(56, 189, 248, 0.95)",
+      };
+    }
+    for (const target of legalTargets) {
+      const isCapture = Boolean(game.get(target));
+      styles[target] = {
+        background: isCapture
+          ? "rgba(239, 68, 68, 0.35)"
+          : "radial-gradient(circle, rgba(14, 165, 233, 0.7) 18%, transparent 20%)",
+        ...(isCapture
+          ? { boxShadow: "inset 0 0 0 4px rgba(14, 165, 233, 0.75)" }
+          : {}),
+      };
+    }
+    return styles;
+  }, [game, legalTargets, selectedSquare]);
+
+  useEffect(() => {
+    setSelectedSquare(null);
+  }, [livePosition, selectedMoveNumber]);
 
   const initialTimeMs = useMemo(() => {
     return parseInitialTimeMs(match?.time_control);
@@ -670,6 +711,39 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     },
     [game, gameFinished, isReviewingMove, match, myColor, submitGameMove, user],
   );
+  const handleBoardSquareClick = useCallback(
+    ({ square }: { square: string }) => {
+      if (
+        !match ||
+        !user ||
+        gameFinished ||
+        match.result !== "pending" ||
+        isReviewingMove ||
+        promotionRequest ||
+        game.turn() !== myColor
+      ) {
+        setSelectedSquare(null);
+        return;
+      }
+      const clicked = square as Square;
+      if (selectedSquare && legalTargets.includes(clicked)) {
+        const movingPiece = game.get(selectedSquare);
+        const promotion = game.moves({ verbose: true }).some(
+          (move) => move.from === selectedSquare && move.to === clicked && move.promotion,
+        );
+        if (promotion && movingPiece) {
+          setPromotionRequest({ from: selectedSquare, to: clicked, color: movingPiece.color });
+        } else {
+          submitGameMove(selectedSquare, clicked);
+        }
+        setSelectedSquare(null);
+        return;
+      }
+      const piece = game.get(clicked);
+      setSelectedSquare(piece?.color === myColor ? clicked : null);
+    },
+    [game, gameFinished, isReviewingMove, legalTargets, match, myColor, promotionRequest, selectedSquare, submitGameMove, user],
+  );
 
   if (isMatchLoading) {
     return (
@@ -786,6 +860,8 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
                     !isReviewingMove
                   }
                   onPieceDrop={handlePieceDrop}
+                  onSquareClick={handleBoardSquareClick}
+                  squareStyles={legalMoveStyles}
                 />
                 {promotionRequest && (
                   <PromotionPicker
