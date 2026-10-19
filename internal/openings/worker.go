@@ -174,7 +174,7 @@ func (w *Worker) GetOpenings(playedPGN string) (Opening, bool) {
 
 func parseMoves(pgn string) []string {
 	moves := make([]string, 0, 40)
-	for _, token := range strings.Fields(pgn) {
+	for token := range strings.FieldsSeq(pgn) {
 		if strings.HasPrefix(token, "{") || strings.HasPrefix(token, ";") || strings.ContainsAny(token, "()") || strings.HasPrefix(token, "$") {
 			continue
 		}

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { registerSchema } from "../schemas/register-schema";
 import { useRegister } from "../hooks/use-register";
 
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 
@@ -48,7 +48,7 @@ export function RegisterForm() {
       password: "",
     },
   });
-  const password = form.watch("password");
+  const password = useWatch({ control: form.control, name: "password", defaultValue: "" });
   const passwordRules = [
     { label: "8–128 characters", valid: password.length >= 8 && password.length <= 128 },
     { label: "At least one lowercase letter", valid: /[a-z]/.test(password) },
@@ -69,9 +69,9 @@ export function RegisterForm() {
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-zinc-950 px-6 py-12">
       {/* Background */}
       <div className="absolute inset-0">
-        <div className="absolute left-0 top-0 h-[600px] w-[600px] rounded-full bg-zinc-800/30 blur-3xl" />
+        <div className="absolute left-0 top-0 h-150 w-150 rounded-full bg-zinc-800/30 blur-3xl" />
 
-        <div className="absolute bottom-0 right-0 h-[600px] w-[600px] rounded-full bg-zinc-700/20 blur-3xl" />
+        <div className="absolute bottom-0 right-0 h-150 w-150 rounded-full bg-zinc-700/20 blur-3xl" />
       </div>
 
       {/* Register Card */}
@@ -123,7 +123,7 @@ export function RegisterForm() {
                   type="text"
                   placeholder="Choose a username"
                   autoComplete="username"
-                  className="h-12 border-zinc-700 bg-zinc-950 pl-12 text-base text-zinc-100 placeholder:text-zinc-500 focus-visible:border-zinc-500"
+                  className="h-12 border-zinc-700 bg-zinc-950 pl-12 text-base text-zinc-100 placeholder:opacity-50"
                   {...form.register("username")}
                 />
               </div>
@@ -156,7 +156,7 @@ export function RegisterForm() {
                   type="email"
                   placeholder="name@example.com"
                   autoComplete="email"
-                  className="h-12 border-zinc-700 bg-zinc-950 pl-12 text-base text-zinc-100 placeholder:text-zinc-500 focus-visible:border-zinc-500"
+                  className="h-12 border-zinc-700 bg-zinc-950 pl-12 text-base text-zinc-100 placeholder:opacity-50"
                   {...form.register("email")}
                 />
               </div>
@@ -187,7 +187,7 @@ export function RegisterForm() {
                   placeholder="Create a password"
                   autoComplete="new-password"
                   maxLength={128}
-                  className="h-12 border-zinc-700 bg-zinc-950 pl-12 pr-12 text-base text-zinc-100 placeholder:text-zinc-500 focus-visible:border-zinc-500"
+                  className="h-12 border-zinc-700 bg-zinc-950 pl-12 pr-12 text-base text-zinc-100 placeholder:opacity-50"
                   {...form.register("password")}
                 />
                 <button

@@ -108,7 +108,7 @@ type loginRedisStore struct {
 	err        error
 }
 
-func (s *loginRedisStore) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.StatusCmd {
+func (s *loginRedisStore) Set(ctx context.Context, key string, value any, expiration time.Duration) *redis.StatusCmd {
 	s.key, s.value, s.expiration = key, fmt.Sprint(value), expiration
 	cmd := redis.NewStatusCmd(ctx)
 	if s.err != nil {

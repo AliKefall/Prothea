@@ -58,9 +58,9 @@ export function LoginForm() {
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-zinc-950 px-6 py-12">
       {/* Background */}
       <div className="absolute inset-0">
-        <div className="absolute left-0 top-0 h-[600px] w-[600px] rounded-full bg-zinc-800/30 blur-3xl" />
+        <div className="absolute left-0 top-0 h-150 w-150 rounded-full bg-zinc-800/30 blur-3xl" />
 
-        <div className="absolute bottom-0 right-0 h-[600px] w-[600px] rounded-full bg-zinc-700/20 blur-3xl" />
+        <div className="absolute bottom-0 right-0 h-150 w-150 rounded-full bg-zinc-700/20 blur-3xl" />
       </div>
 
       {/* Login Card */}
@@ -114,7 +114,7 @@ export function LoginForm() {
                   type="email"
                   placeholder="name@example.com"
                   autoComplete="email"
-                  className="h-12 border-zinc-700 bg-zinc-950 pl-12 text-base text-zinc-100 placeholder:text-zinc-500 focus-visible:border-zinc-500"
+                  className="h-12 border-zinc-700 bg-zinc-950 pl-12 text-base text-zinc-100 placeholder:opacity-50"
                   {...form.register("email")}
                 />
               </div>
@@ -145,7 +145,7 @@ export function LoginForm() {
                   placeholder="Enter your password"
                   autoComplete="current-password"
                   maxLength={128}
-                  className="h-12 border-zinc-700 bg-zinc-950 pl-12 pr-12 text-base text-zinc-100 placeholder:text-zinc-500 focus-visible:border-zinc-500"
+                  className="h-12 border-zinc-700 bg-zinc-950 pl-12 pr-12 text-base text-zinc-100 placeholder:opacity-50"
                   {...form.register("password")}
                 />
                 <button

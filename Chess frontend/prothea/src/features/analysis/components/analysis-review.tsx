@@ -731,7 +731,7 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
               </div>
             </div>
             {openingAnalysis && openingAnalysis.total_plies > 0 && (
-              <div className="mx-4 my-3 rounded-xl border border-sky-400/15 bg-gradient-to-br from-sky-400/6 to-zinc-900 px-4 py-3 text-zinc-400" data-component="opening-summary">
+              <div className="mx-4 my-3 rounded-xl border border-sky-400/15 bg-linear-to-br from-sky-400/6 to-zinc-900 px-4 py-3 text-zinc-400" data-component="opening-summary">
                 <p className="text-sm font-semibold text-zinc-100">
                   {opening?.name ?? "Unclassified opening line"}
                 </p>

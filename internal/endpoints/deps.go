@@ -17,7 +17,7 @@ import (
 )
 
 type LoginSessionStore interface {
-	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.StatusCmd
+	Set(ctx context.Context, key string, value any, expiration time.Duration) *redis.StatusCmd
 }
 
 type Deps struct {

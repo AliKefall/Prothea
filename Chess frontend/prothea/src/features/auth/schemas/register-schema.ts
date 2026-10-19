@@ -12,8 +12,7 @@ export const registerSchema = z.object({
     .string()
     .trim()
     .toLowerCase()
-    .email("Enter a valid email address")
-    .max(254, "Email must be no more than 254 characters"),
+    .pipe(z.email({ error: "Enter a valid email address" }).max(254, "Email must be no more than 254 characters")),
 
   password: z
     .string()
