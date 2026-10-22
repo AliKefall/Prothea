@@ -4,7 +4,10 @@ import Link from "next/link";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowPathIcon,
+  BookOpenIcon,
+  MagnifyingGlassIcon,
   StarIcon,
+  XMarkIcon,
 } from "@heroicons/react/24/solid";
 import {
   Chessboard,
@@ -18,6 +21,7 @@ import { MoveHistory } from "@/features/chess/components/move-history";
 import { useMatch } from "@/features/chess/hooks/use-match";
 import { useMatchMoves } from "@/features/chess/hooks/use-match-moves";
 import { useMatchOpening } from "@/features/chess/hooks/use-match-opening";
+import { useOpeningLibrary } from "@/features/chess/hooks/use-opening-library";
 import { PromotionPicker } from "@/features/chess/components/promotion-picker";
 import { AnalysisSymbolInfo } from "./analysis-symbol-info";
 import {
@@ -25,6 +29,7 @@ import {
   createMove,
   createPosition,
   INITIAL_FEN,
+  parseOpeningPgn,
 } from "../lib/position";
 import { useStockfish } from "../hooks/use-stockfish";
 import type { AnalysisMove, EngineMove } from "../types/analysis";
@@ -66,9 +71,9 @@ function classifyMove(
   if (before === null || after === null) return null;
 
   const lostAdvantage = whiteMoved ? before - after : after - before;
-  if (lostAdvantage <= 0.15) return "good";
-  if (lostAdvantage <= 0.75) return "inaccuracy";
-  if (lostAdvantage <= 1.5) return "mistake";
+  if (lostAdvantage <= 0.5) return "good";
+  if (lostAdvantage <= 1.5) return "inaccuracy";
+  if (lostAdvantage <= 2.5) return "mistake";
   return "blunder";
 }
 
@@ -147,6 +152,8 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     beforeFen: string;
     afterFen: string;
     playedUci: string;
+    qualityKey: string;
+    whiteMoved: boolean;
     phase: "before" | "after";
     bestBefore?: EngineMove;
   };
@@ -159,6 +166,15 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
   const { data: moves = [], isLoading: movesLoading } = useMatchMoves(matchId);
   const [moveNumber, setMoveNumber] = useState(0);
   const [variationMoves, setVariationMoves] = useState<AnalysisMove[]>([]);
+  const [selectedOpening, setSelectedOpening] = useState<{
+    eco: string;
+    name: string;
+    pgn: string;
+    moves: AnalysisMove[];
+  } | null>(null);
+  const [isOpeningLibraryOpen, setIsOpeningLibraryOpen] = useState(false);
+  const [openingSearch, setOpeningSearch] = useState("");
+  const [openingResultLimit, setOpeningResultLimit] = useState(50);
   const [isFlipped, setIsFlipped] = useState(false);
   const [showBestMoveArrow, setShowBestMoveArrow] = useState(true);
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
@@ -168,11 +184,15 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     color: "w" | "b";
   } | null>(null);
   const [playedMoveQuality, setPlayedMoveQuality] = useState<{
-    ply: number;
+    key: string;
     quality: MoveQuality;
   } | null>(null);
   const qualityRequestRef = useRef<QualityRequest | null>(null);
   const qualityCacheRef = useRef(new Map<string, MoveQuality>());
+  const openingReturnPositionRef = useRef<{
+    moveNumber: number;
+    variationMoves: AnalysisMove[];
+  } | null>(null);
 
   const currentFen = useMemo(
     () =>
@@ -190,6 +210,28 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     [currentFen, variationMoves],
   );
   const displayedFen = variationFen ?? currentFen;
+  const activePlayedMove = useMemo(() => {
+    const variationMove = variationMoves.at(-1);
+    const playedMove = variationMove ?? moves[moveNumber - 1];
+    if (!playedMove || (!variationMove && moveNumber === 0)) return null;
+
+    const beforeFen = variationMove
+      ? variationMoves.slice(0, -1).reduce<string | null>(
+          (fen, move) => (fen ? applyMove(fen, move) : null),
+          currentFen,
+        ) ?? currentFen
+      : moveNumber === 1
+        ? INITIAL_FEN
+        : (moves[moveNumber - 2]?.fen_after ?? INITIAL_FEN);
+
+    return {
+      beforeFen,
+      afterFen: displayedFen,
+      playedUci: playedMove.uci,
+      whiteMoved: beforeFen.split(" ")[1] === "w",
+      qualityKey: `${matchId}:${moveNumber}:${beforeFen}:${playedMove.uci}:${displayedFen}`,
+    };
+  }, [currentFen, displayedFen, matchId, moveNumber, moves, variationMoves]);
   const openingMoves = useMemo(
     () => [
       ...moves.slice(0, moveNumber).map((move) => move.san),
@@ -199,6 +241,30 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
   );
   const { data: openingAnalysis } = useMatchOpening(matchId, openingMoves);
   const opening = openingAnalysis?.opening;
+  const { data: openingCatalog = [], isLoading: isOpeningCatalogLoading } =
+    useOpeningLibrary(isOpeningLibraryOpen);
+  const filteredOpenings = useMemo(() => {
+    const search = openingSearch.trim().toLocaleLowerCase();
+    if (!search) return openingCatalog;
+    return openingCatalog.filter((entry) =>
+      `${entry.name} ${entry.eco} ${entry.pgn}`
+        .toLocaleLowerCase()
+        .includes(search),
+    );
+  }, [openingCatalog, openingSearch]);
+  const visibleOpenings = filteredOpenings.slice(0, openingResultLimit);
+  const openingPgn = opening?.pgn;
+  const openingLine = useMemo(
+    () => (openingPgn ? parseOpeningPgn(openingPgn) : []),
+    [openingPgn],
+  );
+  const activePly = moveNumber + variationMoves.length;
+  const activeMoveIsInBook = Boolean(
+    activePlayedMove &&
+      openingAnalysis &&
+      activePly > 0 &&
+      openingAnalysis.matched_plies >= activePly,
+  );
   const isWhite = match && user ? match.white_id === user.user_id : true;
   const positionGame = useMemo(
     () => createPosition(displayedFen),
@@ -208,31 +274,32 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
 
   useEffect(() => {
     if (!match || match.result === "pending" || !user) return;
-    const qualityKey = `${matchId}:${moveNumber}:${moves[moveNumber - 1]?.uci ?? ""}:${displayedFen}`;
-    const cachedQuality = qualityCacheRef.current.get(qualityKey);
+    if (activePlayedMove && openingMoves.length > 0 && !openingAnalysis) {
+      qualityRequestRef.current = null;
+      analyze(displayedFen, { depth: 14, multiPv: 3 });
+      return;
+    }
+    if (activePlayedMove && activeMoveIsInBook) {
+      qualityRequestRef.current = null;
+      analyze(displayedFen, { depth: 14, multiPv: 3 });
+      return;
+    }
+    const cachedQuality = activePlayedMove
+      ? qualityCacheRef.current.get(activePlayedMove.qualityKey)
+      : undefined;
     setPlayedMoveQuality(
-      cachedQuality ? { ply: moveNumber, quality: cachedQuality } : null,
+      cachedQuality && activePlayedMove
+        ? { key: activePlayedMove.qualityKey, quality: cachedQuality }
+        : null,
     );
-    if (variationMoves.length === 0 && moveNumber > 0) {
-      const playedMove = moves[moveNumber - 1];
-      if (playedMove && !cachedQuality) {
-        const beforeFen =
-          moveNumber === 1
-            ? INITIAL_FEN
-            : (moves[moveNumber - 2]?.fen_after ?? INITIAL_FEN);
-        qualityRequestRef.current = {
-          beforeFen,
-          afterFen: displayedFen,
-          playedUci: playedMove.uci,
-          phase: "before",
-        };
-        analyze(beforeFen, { depth: 14, multiPv: 1 });
-        return;
-      }
+    if (activePlayedMove && !cachedQuality) {
+      qualityRequestRef.current = { ...activePlayedMove, phase: "before" };
+      analyze(activePlayedMove.beforeFen, { depth: 14, multiPv: 1 });
+      return;
     }
     qualityRequestRef.current = null;
     analyze(displayedFen, { depth: 14, multiPv: 3 });
-  }, [analyze, currentFen, displayedFen, match, matchId, moveNumber, moves, user, variationMoves.length]);
+  }, [activeMoveIsInBook, activePlayedMove, analyze, displayedFen, match, openingAnalysis, openingMoves.length, user]);
 
   useEffect(() => {
     const request = qualityRequestRef.current;
@@ -240,7 +307,7 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     if (request.phase === "before" && result.fen === request.beforeFen) {
       request.bestBefore = result.moves[0];
       request.phase = "after";
-      analyze(request.afterFen, { depth: 14, multiPv: 1 });
+      analyze(request.afterFen, { depth: 14, multiPv: 3 });
       return;
     }
     if (request.phase !== "after" || result.fen !== request.afterFen) return;
@@ -249,15 +316,14 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
       request.playedUci,
       request.bestBefore,
       result.moves[0],
-      moveNumber % 2 === 1,
+      request.whiteMoved,
     );
     if (quality) {
-      const qualityKey = `${matchId}:${moveNumber}:${request.playedUci}:${request.afterFen}`;
-      qualityCacheRef.current.set(qualityKey, quality);
-      setPlayedMoveQuality({ ply: moveNumber, quality });
+      qualityCacheRef.current.set(request.qualityKey, quality);
+      setPlayedMoveQuality({ key: request.qualityKey, quality });
     }
     qualityRequestRef.current = null;
-  }, [analyze, isAnalyzing, matchId, moveNumber, result]);
+  }, [analyze, isAnalyzing, result]);
 
   const handleVariationMove = useCallback(
     (sourceSquare: string, targetSquare: string | null) => {
@@ -397,7 +463,7 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
   const boardBestMoves = fresh && result ? result.moves.slice(0, 3) : [];
   const bestFrom = boardBestMoves[0]?.uci.slice(0, 2);
   const visibleMoveQuality =
-    variationMoves.length === 0 && playedMoveQuality?.ply === moveNumber
+    activePlayedMove && playedMoveQuality?.key === activePlayedMove.qualityKey
       ? playedMoveQuality.quality
       : undefined;
   const visibleProblemQuality =
@@ -407,7 +473,7 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
       ? visibleMoveQuality
       : undefined;
   const qualitySquare = visibleProblemQuality
-    ? moves[moveNumber - 1]?.uci.slice(2, 4)
+    ? activePlayedMove?.playedUci.slice(2, 4)
     : undefined;
   const arrows = useMemo<Arrow[]>(() => {
     const move = fresh ? result?.moves[0]?.uci : undefined;
@@ -452,6 +518,22 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     setSelectedSquare(null);
     setVariationMoves([]);
     setMoveNumber(nextMoveNumber);
+    setSelectedOpening(null);
+    openingReturnPositionRef.current = null;
+  };
+
+  const closeOpeningLine = () => {
+    setPromotionRequest(null);
+    setSelectedSquare(null);
+    const returnPosition = openingReturnPositionRef.current;
+    if (returnPosition) {
+      setMoveNumber(returnPosition.moveNumber);
+      setVariationMoves(returnPosition.variationMoves);
+    } else {
+      setVariationMoves([]);
+    }
+    setSelectedOpening(null);
+    openingReturnPositionRef.current = null;
   };
 
   const stepBack = () => {
@@ -475,6 +557,26 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     }
     setVariationMoves((current) =>
       current.slice(0, targetPly - moveNumber),
+    );
+  };
+
+  const openOpeningLine = (
+    line: AnalysisMove[] = openingLine,
+    throughPly = line.length,
+    openingDetails = opening
+      ? { eco: opening.eco, name: opening.name, pgn: opening.pgn }
+      : null,
+  ) => {
+    if (line.length === 0) return;
+    if (!openingReturnPositionRef.current) {
+      openingReturnPositionRef.current = { moveNumber, variationMoves };
+    }
+    setPromotionRequest(null);
+    setSelectedSquare(null);
+    setMoveNumber(0);
+    setVariationMoves(line.slice(0, throughPly));
+    setSelectedOpening(
+      openingDetails ? { ...openingDetails, moves: line } : null,
     );
   };
 
@@ -623,8 +725,11 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
             <div className="flex shrink-0 gap-2">
               <button
                 type="button"
-                onClick={() => selectMove(0)}
-                disabled={moveNumber === 0 && variationMoves.length === 0}
+                onClick={() => {
+                  if (selectedOpening) setVariationMoves([]);
+                  else selectMove(0);
+                }}
+                disabled={selectedOpening ? variationMoves.length === 0 : moveNumber === 0 && variationMoves.length === 0}
                 className="rounded-md border border-zinc-700 px-3 py-2 text-sm disabled:opacity-40"
               >
                 First
@@ -639,20 +744,30 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
               </button>
               <button
                 type="button"
-                onClick={() =>
-                  selectMove(Math.min(moves.length, moveNumber + 1))
-                }
-                disabled={
-                  moveNumber >= moves.length || variationMoves.length > 0
-                }
+                onClick={() => {
+                  if (selectedOpening) {
+                    setVariationMoves(
+                      selectedOpening.moves.slice(0, variationMoves.length + 1),
+                    );
+                  } else {
+                    selectMove(Math.min(moves.length, moveNumber + 1));
+                  }
+                }}
+                disabled={selectedOpening ? variationMoves.length >= selectedOpening.moves.length : moveNumber >= moves.length || variationMoves.length > 0}
                 className="rounded-md border border-zinc-700 px-3 py-2 text-sm disabled:opacity-40"
               >
                 Next
               </button>
               <button
                 type="button"
-                onClick={() => selectMove(moves.length)}
-                disabled={moveNumber >= moves.length}
+                onClick={() => {
+                  if (selectedOpening) {
+                    setVariationMoves(selectedOpening.moves);
+                  } else {
+                    selectMove(moves.length);
+                  }
+                }}
+                disabled={selectedOpening ? variationMoves.length >= selectedOpening.moves.length : moveNumber >= moves.length}
                 className="rounded-md border border-zinc-700 px-3 py-2 text-sm disabled:opacity-40"
               >
                 Last
@@ -681,9 +796,13 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
                   <button
                     type="button"
                     onClick={() => {
-                      setVariationMoves([]);
-                      setSelectedSquare(null);
-                      setPromotionRequest(null);
+                      if (selectedOpening) {
+                        closeOpeningLine();
+                      } else {
+                        setVariationMoves([]);
+                        setSelectedSquare(null);
+                        setPromotionRequest(null);
+                      }
                     }}
                     className="rounded-lg bg-sky-300/10 px-3 py-2 text-xs font-medium text-sky-200 hover:bg-sky-300/20"
                   >
@@ -725,16 +844,181 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
                 <div>
                   <h2 className="text-sm font-semibold">Game moves</h2>
                 </div>
-                <span className="rounded-full bg-zinc-800 px-2.5 py-1 text-xs tabular-nums text-zinc-400">
-                  {moves.length}
-                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsOpeningLibraryOpen((open) => !open)}
+                    aria-expanded={isOpeningLibraryOpen}
+                    className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${isOpeningLibraryOpen ? "border-sky-300/40 bg-sky-300/15 text-sky-100" : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"}`}
+                  >
+                    <BookOpenIcon className="h-4 w-4" />
+                    Openings
+                  </button>
+                  <span className="rounded-full bg-zinc-800 px-2.5 py-1 text-xs tabular-nums text-zinc-400">
+                    {moves.length}
+                  </span>
+                </div>
               </div>
             </div>
-            {openingAnalysis && openingAnalysis.total_plies > 0 && (
+            {isOpeningLibraryOpen && (
+              <section
+                aria-label="Opening library"
+                className="mx-3 mt-3 flex min-h-0 flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950/70"
+                data-component="opening-library"
+              >
+                <label className="flex shrink-0 items-center gap-2 border-b border-zinc-800 px-3 py-2.5 text-zinc-500">
+                  <MagnifyingGlassIcon className="h-4 w-4" />
+                  <input
+                    type="search"
+                    value={openingSearch}
+                    onChange={(event) => {
+                      setOpeningSearch(event.target.value);
+                      setOpeningResultLimit(50);
+                    }}
+                    placeholder="Search all openings"
+                    className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-zinc-500"
+                    aria-label="Search all openings"
+                  />
+                  <span className="text-xs tabular-nums text-zinc-500">
+                    {filteredOpenings.length}
+                  </span>
+                </label>
+                <div className="min-h-0 overflow-y-auto p-2">
+                  {isOpeningCatalogLoading ? (
+                    <p className="px-2 py-4 text-center text-xs text-zinc-500">
+                      Loading openings…
+                    </p>
+                  ) : openingCatalog.length === 0 ? (
+                    <p className="px-2 py-4 text-center text-xs text-zinc-500">
+                      Opening library is unavailable. Reconnect and try again.
+                    </p>
+                  ) : visibleOpenings.length === 0 ? (
+                    <p className="px-2 py-4 text-center text-xs text-zinc-500">
+                      No openings match this search.
+                    </p>
+                  ) : (
+                    <>
+                      <ul className="space-y-2">
+                        {visibleOpenings.map((entry) => (
+                          <li
+                            key={`${entry.eco}-${entry.name}-${entry.pgn}`}
+                            className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2.5"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="text-xs font-semibold text-zinc-100">
+                                  {entry.name}
+                                </p>
+                                <p className="mt-1 font-mono text-[11px] leading-relaxed text-zinc-400">
+                                  {entry.pgn}
+                                </p>
+                              </div>
+                              <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">
+                                {entry.eco}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const line = parseOpeningPgn(entry.pgn);
+                                openOpeningLine(line, line.length, {
+                                  eco: entry.eco,
+                                  name: entry.name,
+                                  pgn: entry.pgn,
+                                });
+                              }}
+                              className="mt-2 rounded-md border border-sky-300/20 px-2 py-1 text-[11px] font-medium text-sky-200 transition hover:bg-sky-300/10"
+                            >
+                              Show on board
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                      {visibleOpenings.length < filteredOpenings.length && (
+                        <button
+                          type="button"
+                          onClick={() => setOpeningResultLimit((limit) => limit + 50)}
+                          className="mt-2 w-full rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800"
+                        >
+                          Show more ({filteredOpenings.length - visibleOpenings.length} remaining)
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </section>
+            )}
+            {selectedOpening ? (
+              <div className="mx-4 my-3 rounded-xl border border-sky-400/20 bg-linear-to-br from-sky-400/8 to-zinc-900 px-4 py-3 text-zinc-400" data-component="selected-opening-line">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-zinc-100">
+                      {selectedOpening.name}
+                    </p>
+                    <p className="mt-1 text-[11px] text-zinc-500">
+                      {selectedOpening.eco}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeOpeningLine}
+                    aria-label="Close opening line and return to game"
+                    title="Close opening line"
+                    className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-zinc-700 text-zinc-400 transition hover:border-zinc-500 hover:bg-zinc-800 hover:text-white"
+                  >
+                    <XMarkIcon className="h-4 w-4" />
+                  </button>
+                </div>
+                <ol className="mt-3 flex flex-wrap gap-1.5" aria-label={`${selectedOpening.name} moves`}>
+                  {selectedOpening.moves.map((move, index) => (
+                    <li key={`${move.uci}-${index}`}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVariationMoves(selectedOpening.moves.slice(0, index + 1));
+                          setSelectedSquare(null);
+                          setPromotionRequest(null);
+                        }}
+                        aria-label={`Show ${selectedOpening.name} through ${move.san}`}
+                        aria-current={variationMoves.length === index + 1 ? "step" : undefined}
+                        className={`rounded-md px-2 py-1 font-mono text-xs transition ${variationMoves.length === index + 1 ? "bg-sky-300 text-zinc-950" : "bg-zinc-800 text-zinc-200 hover:bg-sky-300/20 hover:text-sky-100"}`}
+                      >
+                        {Math.floor(index / 2) + 1}{index % 2 === 0 ? "." : "…"} {move.san}
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            ) : openingAnalysis && openingAnalysis.total_plies > 0 ? (
               <div className="mx-4 my-3 rounded-xl border border-sky-400/15 bg-linear-to-br from-sky-400/6 to-zinc-900 px-4 py-3 text-zinc-400" data-component="opening-summary">
                 <p className="text-sm font-semibold text-zinc-100">
                   {opening?.name ?? "Unclassified opening line"}
                 </p>
+                {openingLine.length > 0 && (
+                  <>
+                    <ol className="mt-3 flex flex-wrap gap-1.5" aria-label={`${opening?.name ?? "Opening"} moves`}>
+                      {openingLine.map((move, index) => (
+                        <li key={`${move.uci}-${index}`}>
+                          <button
+                            type="button"
+                            onClick={() => openOpeningLine(openingLine, index + 1)}
+                            aria-label={`Show opening through ${move.san}`}
+                            className="rounded-md bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-200 transition hover:bg-sky-300/20 hover:text-sky-100"
+                          >
+                            {Math.floor(index / 2) + 1}{index % 2 === 0 ? "." : "…"} {move.san}
+                          </button>
+                        </li>
+                      ))}
+                    </ol>
+                    <button
+                      type="button"
+                      onClick={() => openOpeningLine()}
+                      className="mt-3 w-full rounded-lg border border-sky-300/20 bg-sky-300/10 px-3 py-2 text-xs font-semibold text-sky-100 transition hover:bg-sky-300/20"
+                    >
+                      Open this opening line on the board
+                    </button>
+                  </>
+                )}
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <p className="min-w-0 text-xs text-zinc-400">
                     {openingAnalysis.exit_ply
@@ -750,7 +1034,7 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
                   </button>
                 </div>
               </div>
-            )}
+            ) : null}
             <div className="min-h-0 flex-1" data-component="analysis-move-history">
               <MoveHistory
                 moves={moves}

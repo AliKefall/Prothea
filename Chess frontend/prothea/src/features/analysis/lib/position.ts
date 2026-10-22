@@ -8,6 +8,37 @@ export function createPosition(fen: string = INITIAL_FEN): Chess {
   return new Chess(fen);
 }
 
+export function parseOpeningPgn(pgn: string): AnalysisMove[] {
+  const chess = createPosition();
+  const tokens = pgn
+    .replace(/\{[^}]*\}/g, " ")
+    .replace(/\([^)]*\)/g, " ")
+    .split(/\s+/)
+    .flatMap((token) => {
+      const san = token.replace(/^\d+\.(?:\.\.)?/, "");
+      return san ? [san] : [];
+    })
+    .filter((token) => !/^(1-0|0-1|1\/2-1\/2|\*)$/.test(token));
+  const moves: AnalysisMove[] = [];
+
+  for (const san of tokens) {
+    try {
+      const move = chess.move(san);
+      moves.push({
+        from: move.from,
+        to: move.to,
+        san: move.san,
+        uci: `${move.from}${move.to}${move.promotion ?? ""}`,
+        ...(move.promotion ? { promotion: move.promotion } : {}),
+      });
+    } catch {
+      break;
+    }
+  }
+
+  return moves;
+}
+
 export function getFen(chess: Chess): string {
   return chess.fen();
 }

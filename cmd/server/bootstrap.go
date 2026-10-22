@@ -43,6 +43,7 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 		log.Fatalf("opening database initialization failed: %v", err)
 	}
 	hub.Register(websocket.EventGetOpening, openingIndex.HandleWebSocketRequest)
+	hub.Register(websocket.EventGetOpeningLibrary, openingIndex.HandleLibraryWebSocketRequest)
 	configureGameEvents(hub, gameService)
 	configureUserLifecycle(hub, gameService, friendsService)
 

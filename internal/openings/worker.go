@@ -37,7 +37,8 @@ type node struct {
 // Worker is an immutable opening index after SetOpenings completes. Lookups
 // only read the trie, so callers can query it concurrently without locking.
 type Worker struct {
-	root *node
+	root     *node
+	openings []Opening
 }
 
 func NewWorker() *Worker { return &Worker{} }
@@ -103,7 +104,22 @@ func (w *Worker) SetOpenings() error {
 		}
 	}
 	w.root = root
+	w.openings = loaded
 	return nil
+}
+
+func (w *Worker) ListOpenings() []Opening {
+	openings := append([]Opening(nil), w.openings...)
+	sort.Slice(openings, func(i, j int) bool {
+		if openings[i].Name != openings[j].Name {
+			return openings[i].Name < openings[j].Name
+		}
+		if openings[i].Code != openings[j].Code {
+			return openings[i].Code < openings[j].Code
+		}
+		return openings[i].PGN < openings[j].PGN
+	})
+	return openings
 }
 
 func readShard(path string) ([]Opening, error) {

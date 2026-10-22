@@ -20,6 +20,10 @@ type openingResponse struct {
 	Analysis Analysis `json:"analysis"`
 }
 
+type openingLibraryResponse struct {
+	Openings []Opening `json:"openings"`
+}
+
 func (w *Worker) HandleWebSocketRequest(_ context.Context, client *websocket.Client, event websocket.Event) error {
 	if client == nil || client.UserID == "" {
 		return errors.New("authenticated websocket client is required")
@@ -44,6 +48,19 @@ func (w *Worker) HandleWebSocketRequest(_ context.Context, client *websocket.Cli
 		MatchID:  request.MatchID,
 		LineKey:  lineKey,
 		Analysis: w.AnalyzeMoves(request.Moves),
+	})
+	if err != nil {
+		return err
+	}
+	return client.SendEvent(response)
+}
+
+func (w *Worker) HandleLibraryWebSocketRequest(_ context.Context, client *websocket.Client, _ websocket.Event) error {
+	if client == nil || client.UserID == "" {
+		return errors.New("authenticated websocket client is required")
+	}
+	response, err := websocket.NewEvent(websocket.EventOpeningLibrary, openingLibraryResponse{
+		Openings: w.ListOpenings(),
 	})
 	if err != nil {
 		return err
