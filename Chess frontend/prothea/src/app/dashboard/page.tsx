@@ -246,7 +246,7 @@ export default function DashboardPage() {
               <div className="space-y-3 text-sm leading-7 text-zinc-400">
                 <p>
                   Passwords are hashed with Argon2id. Login and registration
-                  have their own rate limiters based on users' IP addresses.
+                  have their own rate limiters based on users&apos; IP addresses.
                   The main rate limiter uses user tokens, which are only
                   available after a successful login. For more information,
                   check the <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-200">internal/ratelimiter</code>{" "}

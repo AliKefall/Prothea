@@ -222,7 +222,11 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
   const [selectedMoveNumber, setSelectedMoveNumber] = useState<number | null>(
     null,
   );
-  const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
+  const [selectedSquareState, setSelectedSquareState] = useState<{
+    square: Square;
+    position: string;
+    selectedMoveNumber: number | null;
+  } | null>(null);
 
   const moves = useMemo<GameMove[]>(() => {
     const merged = new Map<number, GameMove>();
@@ -279,6 +283,11 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
   const isReviewingMove = selectedMove !== undefined;
 
   const position = selectedMove?.fen_after ?? livePosition;
+  const selectedSquare =
+    selectedSquareState?.position === livePosition &&
+    selectedSquareState.selectedMoveNumber === selectedMoveNumber
+      ? selectedSquareState.square
+      : null;
 
   const game = useMemo(() => {
     return new Chess(livePosition);
@@ -311,10 +320,6 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
     }
     return styles;
   }, [game, legalTargets, selectedSquare]);
-
-  useEffect(() => {
-    setSelectedSquare(null);
-  }, [livePosition, selectedMoveNumber]);
 
   const initialTimeMs = useMemo(() => {
     return parseInitialTimeMs(match?.time_control);
@@ -722,7 +727,7 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
         promotionRequest ||
         game.turn() !== myColor
       ) {
-        setSelectedSquare(null);
+        setSelectedSquareState(null);
         return;
       }
       const clicked = square as Square;
@@ -736,13 +741,17 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
         } else {
           submitGameMove(selectedSquare, clicked);
         }
-        setSelectedSquare(null);
+        setSelectedSquareState(null);
         return;
       }
       const piece = game.get(clicked);
-      setSelectedSquare(piece?.color === myColor ? clicked : null);
+      setSelectedSquareState(
+        piece?.color === myColor
+          ? { square: clicked, position: livePosition, selectedMoveNumber }
+          : null,
+      );
     },
-    [game, gameFinished, isReviewingMove, legalTargets, match, myColor, promotionRequest, selectedSquare, submitGameMove, user],
+    [game, gameFinished, isReviewingMove, legalTargets, livePosition, match, myColor, promotionRequest, selectedMoveNumber, selectedSquare, submitGameMove, user],
   );
 
   if (isMatchLoading) {

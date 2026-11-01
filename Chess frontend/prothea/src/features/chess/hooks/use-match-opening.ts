@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { websocketManager } from "@/lib/websocket";
 import type { WebSocketMessage } from "@/lib/dispatcher";
@@ -40,6 +40,7 @@ export function useMatchOpening(matchId: string, moves: readonly string[]) {
     enabled: false,
     staleTime: Number.POSITIVE_INFINITY,
     gcTime: 15 * 60 * 1000,
+    placeholderData: keepPreviousData,
   });
 
   useEffect(() => {

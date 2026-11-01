@@ -154,8 +154,9 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     playedUci: string;
     qualityKey: string;
     whiteMoved: boolean;
-    phase: "before" | "after";
-    bestBefore?: EngineMove;
+    // Önce oynanan sonrası pozisyon (ekranda gösterilen), sonra öncesi analiz edilir.
+    phase: "after" | "before";
+    bestAfter?: EngineMove;
   };
   const user = useAuthStore((state) => state.user);
   const {
@@ -239,7 +240,10 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     ],
     [moveNumber, moves, variationMoves],
   );
-  const { data: openingAnalysis } = useMatchOpening(matchId, openingMoves);
+  const {
+    data: openingAnalysis,
+    isPlaceholderData: isOpeningAnalysisStale,
+  } = useMatchOpening(matchId, openingMoves);
   const opening = openingAnalysis?.opening;
   const { data: openingCatalog = [], isLoading: isOpeningCatalogLoading } =
     useOpeningLibrary(isOpeningLibraryOpen);
@@ -262,6 +266,7 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
   const activeMoveIsInBook = Boolean(
     activePlayedMove &&
       openingAnalysis &&
+      !isOpeningAnalysisStale &&
       activePly > 0 &&
       openingAnalysis.matched_plies >= activePly,
   );
@@ -272,50 +277,70 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
   );
   const { analyze, result, isAnalyzing, error } = useStockfish();
 
+  // analyze referansı değişse bile efektlerin yeniden çalışıp motoru
+  // sürekli yeniden başlatmaması için ref üzerinden çağırıyoruz.
+  const analyzeRef = useRef(analyze);
   useEffect(() => {
-    if (!match || match.result === "pending" || !user) return;
-    if (activePlayedMove && openingMoves.length > 0 && !openingAnalysis) {
-      qualityRequestRef.current = null;
-      analyze(displayedFen, { depth: 14, multiPv: 3 });
-      return;
+    analyzeRef.current = analyze;
+  }, [analyze]);
+
+  const canAnalyze = Boolean(match && match.result !== "pending" && user);
+
+  // Ekranda gösterilen motor sonucu: yalnızca GÖRÜNEN pozisyon için tamamlanmış
+  // sonuç gelince güncellenir. Kalite hesabı için yapılan ara analizler
+  // (başka pozisyonlar) paneli / eval bar'ı / okları oynatmaz.
+  const [shownResult, setShownResult] = useState<typeof result | null>(null);
+  useEffect(() => {
+    if (result && !isAnalyzing && result.fen === displayedFen) {
+      setShownResult(result);
     }
-    if (activePlayedMove && activeMoveIsInBook) {
-      qualityRequestRef.current = null;
-      analyze(displayedFen, { depth: 14, multiPv: 3 });
-      return;
-    }
+  }, [result, isAnalyzing, displayedFen]);
+
+  // Ana analiz efekti: sadece pozisyon / oynanan hamle değişince çalışır.
+  // Opening verisinin gelmesi artık motoru yeniden başlatmaz.
+  useEffect(() => {
+    if (!canAnalyze) return;
+    const run = analyzeRef.current;
+
     const cachedQuality = activePlayedMove
       ? qualityCacheRef.current.get(activePlayedMove.qualityKey)
       : undefined;
-    setPlayedMoveQuality(
-      cachedQuality && activePlayedMove
-        ? { key: activePlayedMove.qualityKey, quality: cachedQuality }
-        : null,
-    );
+
+    if (activePlayedMove && cachedQuality) {
+      setPlayedMoveQuality((prev) =>
+        prev?.key === activePlayedMove.qualityKey &&
+        prev.quality === cachedQuality
+          ? prev
+          : { key: activePlayedMove.qualityKey, quality: cachedQuality },
+      );
+    }
+
     if (activePlayedMove && !cachedQuality) {
-      qualityRequestRef.current = { ...activePlayedMove, phase: "before" };
-      analyze(activePlayedMove.beforeFen, { depth: 14, multiPv: 1 });
+      qualityRequestRef.current = { ...activePlayedMove, phase: "after" };
+      run(activePlayedMove.afterFen, { depth: 14, multiPv: 3 });
       return;
     }
+
     qualityRequestRef.current = null;
-    analyze(displayedFen, { depth: 14, multiPv: 3 });
-  }, [activeMoveIsInBook, activePlayedMove, analyze, displayedFen, match, openingAnalysis, openingMoves.length, user]);
+    run(displayedFen, { depth: 14, multiPv: 3 });
+  }, [canAnalyze, activePlayedMove, displayedFen]);
 
   useEffect(() => {
     const request = qualityRequestRef.current;
     if (!request || isAnalyzing || !result) return;
-    if (request.phase === "before" && result.fen === request.beforeFen) {
-      request.bestBefore = result.moves[0];
-      request.phase = "after";
-      analyze(request.afterFen, { depth: 14, multiPv: 3 });
+
+    if (request.phase === "after" && result.fen === request.afterFen) {
+      request.bestAfter = result.moves[0];
+      request.phase = "before";
+      analyzeRef.current(request.beforeFen, { depth: 14, multiPv: 1 });
       return;
     }
-    if (request.phase !== "after" || result.fen !== request.afterFen) return;
+    if (request.phase !== "before" || result.fen !== request.beforeFen) return;
 
     const quality = classifyMove(
       request.playedUci,
-      request.bestBefore,
       result.moves[0],
+      request.bestAfter,
       request.whiteMoved,
     );
     if (quality) {
@@ -323,7 +348,7 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
       setPlayedMoveQuality({ key: request.qualityKey, quality });
     }
     qualityRequestRef.current = null;
-  }, [analyze, isAnalyzing, result]);
+  }, [isAnalyzing, result]);
 
   const handleVariationMove = useCallback(
     (sourceSquare: string, targetSquare: string | null) => {
@@ -432,18 +457,17 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     [handleVariationMove, positionGame],
   );
 
-  // Eski sonuç analiz sürerken de tutulur; panel boşalmasın diye
-  const isStale = !!result && result.fen !== displayedFen;
-  const fresh = !isStale && !isAnalyzing;
+  // Gösterilen sonuç şu anki pozisyona ait mi? (ok / rozet / "Best" için)
+  const fresh = !!shownResult && shownResult.fen === displayedFen;
 
   const panelMoves = useMemo(() => {
-    if (!result) return [];
-    return result.moves.slice(0, 3).map((move) => ({
+    if (!shownResult) return [];
+    return shownResult.moves.slice(0, 3).map((move) => ({
       uci: move.uci,
       // displayedFen değil: sonucun kendi pozisyonu kullanılır
       san:
         createMove(
-          result.fen,
+          shownResult.fen,
           move.uci.slice(0, 2),
           move.uci.slice(2, 4),
           move.uci.slice(4) || undefined,
@@ -455,38 +479,38 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
             ? "—"
             : `${move.evaluation > 0 ? "+" : ""}${move.evaluation.toFixed(2)}`,
     }));
-  }, [result]);
+  }, [shownResult]);
 
-  // Eval bar için eski değer de kalsın; ani ortaya sıçramasın
-  const bestMove = result?.moves[0];
-  // Tahta okları/rozetleri sadece güncel ve tamamlanmış sonuçla
-  const boardBestMoves = fresh && result ? result.moves.slice(0, 3) : [];
-  const bestFrom = boardBestMoves[0]?.uci.slice(0, 2);
+  // Eval bar ve panel: yeni sonuç gelene kadar eski değer kalır (sıçrama/boşalma yok)
+  const bestMove = shownResult?.moves[0];
+  // Tahta okları/rozetleri sadece güncel pozisyonun sonucuyla
+  const bestUci = fresh ? shownResult?.moves[0]?.uci : undefined;
+  const bestFrom = bestUci?.slice(0, 2);
   const visibleMoveQuality =
     activePlayedMove && playedMoveQuality?.key === activePlayedMove.qualityKey
       ? playedMoveQuality.quality
       : undefined;
   const visibleProblemQuality =
-    visibleMoveQuality === "inaccuracy" ||
-    visibleMoveQuality === "mistake" ||
-    visibleMoveQuality === "blunder"
+    !activeMoveIsInBook &&
+    (visibleMoveQuality === "inaccuracy" ||
+      visibleMoveQuality === "mistake" ||
+      visibleMoveQuality === "blunder")
       ? visibleMoveQuality
       : undefined;
   const qualitySquare = visibleProblemQuality
     ? activePlayedMove?.playedUci.slice(2, 4)
     : undefined;
   const arrows = useMemo<Arrow[]>(() => {
-    const move = fresh ? result?.moves[0]?.uci : undefined;
-    return showBestMoveArrow && move
+    return showBestMoveArrow && bestUci
       ? [
           {
-            startSquare: move.slice(0, 2),
-            endSquare: move.slice(2, 4),
+            startSquare: bestUci.slice(0, 2),
+            endSquare: bestUci.slice(2, 4),
             color: "#38bdf8",
           },
         ]
       : EMPTY_ARROWS;
-  }, [fresh, result, showBestMoveArrow]);
+  }, [bestUci, showBestMoveArrow]);
 
   if (matchLoading || movesLoading) {
     return (
@@ -602,10 +626,10 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
           data-component="analysis-status"
         >
           {error ??
-            (isAnalyzing
-              ? "Evaluating position…"
-              : bestMove
-                ? "Position evaluated"
+            (fresh
+              ? "Position evaluated"
+              : shownResult || isAnalyzing
+                ? "Evaluating position…"
                 : "Evaluation unavailable")}
         </p>
       </div>
@@ -863,7 +887,7 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
             {isOpeningLibraryOpen && (
               <section
                 aria-label="Opening library"
-                className="mx-3 mt-3 flex min-h-0 flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950/70"
+                className="mx-3 mt-3 flex max-h-72 min-h-0 shrink-0 flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950/70"
                 data-component="opening-library"
               >
                 <label className="flex shrink-0 items-center gap-2 border-b border-zinc-800 px-3 py-2.5 text-zinc-500">
@@ -883,7 +907,7 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
                     {filteredOpenings.length}
                   </span>
                 </label>
-                <div className="min-h-0 overflow-y-auto p-2">
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
                   {isOpeningCatalogLoading ? (
                     <p className="px-2 py-4 text-center text-xs text-zinc-500">
                       Loading openings…
@@ -949,7 +973,7 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
               </section>
             )}
             {selectedOpening ? (
-              <div className="mx-4 my-3 rounded-xl border border-sky-400/20 bg-linear-to-br from-sky-400/8 to-zinc-900 px-4 py-3 text-zinc-400" data-component="selected-opening-line">
+              <div className="mx-4 my-3 h-44 shrink-0 overflow-y-auto overscroll-contain rounded-xl border border-sky-400/20 bg-linear-to-br from-sky-400/8 to-zinc-900 px-4 py-3 text-zinc-400" data-component="selected-opening-line">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-zinc-100">
@@ -989,52 +1013,65 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
                   ))}
                 </ol>
               </div>
-            ) : openingAnalysis && openingAnalysis.total_plies > 0 ? (
-              <div className="mx-4 my-3 rounded-xl border border-sky-400/15 bg-linear-to-br from-sky-400/6 to-zinc-900 px-4 py-3 text-zinc-400" data-component="opening-summary">
-                <p className="text-sm font-semibold text-zinc-100">
-                  {opening?.name ?? "Unclassified opening line"}
-                </p>
-                {openingLine.length > 0 && (
+            ) : (
+              // Sabit yükseklikli kutu: hamle yapıldıkça içerik değişse de
+              // altındaki hamle listesi aşağı yukarı kaymaz.
+              <div className="mx-4 my-3 h-44 shrink-0 overflow-y-auto overscroll-contain rounded-xl border border-sky-400/15 bg-linear-to-br from-sky-400/6 to-zinc-900 px-4 py-3 text-zinc-400" data-component="opening-summary">
+                {openingMoves.length === 0 ? (
+                  <p className="text-sm text-zinc-500">
+                    Opening line appears after the first move.
+                  </p>
+                ) : (
                   <>
-                    <ol className="mt-3 flex flex-wrap gap-1.5" aria-label={`${opening?.name ?? "Opening"} moves`}>
-                      {openingLine.map((move, index) => (
-                        <li key={`${move.uci}-${index}`}>
-                          <button
-                            type="button"
-                            onClick={() => openOpeningLine(openingLine, index + 1)}
-                            aria-label={`Show opening through ${move.san}`}
-                            className="rounded-md bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-200 transition hover:bg-sky-300/20 hover:text-sky-100"
-                          >
-                            {Math.floor(index / 2) + 1}{index % 2 === 0 ? "." : "…"} {move.san}
-                          </button>
-                        </li>
-                      ))}
-                    </ol>
-                    <button
-                      type="button"
-                      onClick={() => openOpeningLine()}
-                      className="mt-3 w-full rounded-lg border border-sky-300/20 bg-sky-300/10 px-3 py-2 text-xs font-semibold text-sky-100 transition hover:bg-sky-300/20"
-                    >
-                      Open this opening line on the board
-                    </button>
+                    <p className="text-sm font-semibold text-zinc-100">
+                      {opening?.name ?? "Unclassified opening line"}
+                    </p>
+                    {openingLine.length > 0 && (
+                      <>
+                        <ol className="mt-3 flex flex-wrap gap-1.5" aria-label={`${opening?.name ?? "Opening"} moves`}>
+                          {openingLine.map((move, index) => (
+                            <li key={`${move.uci}-${index}`}>
+                              <button
+                                type="button"
+                                onClick={() => openOpeningLine(openingLine, index + 1)}
+                                aria-label={`Show opening through ${move.san}`}
+                                className="rounded-md bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-200 transition hover:bg-sky-300/20 hover:text-sky-100"
+                              >
+                                {Math.floor(index / 2) + 1}{index % 2 === 0 ? "." : "…"} {move.san}
+                              </button>
+                            </li>
+                          ))}
+                        </ol>
+                        <button
+                          type="button"
+                          onClick={() => openOpeningLine()}
+                          className="mt-3 w-full rounded-lg border border-sky-300/20 bg-sky-300/10 px-3 py-2 text-xs font-semibold text-sky-100 transition hover:bg-sky-300/20"
+                        >
+                          Open this opening line on the board
+                        </button>
+                      </>
+                    )}
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <p className="min-w-0 text-xs text-zinc-400">
+                        {!openingAnalysis
+                          ? "Loading opening…"
+                          : openingAnalysis.exit_ply
+                            ? `Left book at ${Math.ceil(openingAnalysis.exit_ply / 2)}.${openingAnalysis.exit_ply % 2 === 1 ? "" : "…"} ${openingAnalysis.exit_move}`
+                            : `In book through ${openingAnalysis.matched_plies} plies`}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={openOpeningPosition}
+                        disabled={!openingAnalysis || isOpeningAnalysisStale}
+                        className="shrink-0 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs font-medium text-zinc-200 transition hover:border-sky-300/40 hover:bg-sky-300/10"
+                      >
+                        {openingAnalysis?.exit_ply ? "View exit" : "View line"}
+                      </button>
+                    </div>
                   </>
                 )}
-                <div className="mt-2 flex items-center justify-between gap-2">
-                  <p className="min-w-0 text-xs text-zinc-400">
-                    {openingAnalysis.exit_ply
-                      ? `Left book at ${Math.ceil(openingAnalysis.exit_ply / 2)}.${openingAnalysis.exit_ply % 2 === 1 ? "" : "…"} ${openingAnalysis.exit_move}`
-                      : `In book through ${openingAnalysis.matched_plies} plies`}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={openOpeningPosition}
-                    className="shrink-0 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs font-medium text-zinc-200 transition hover:border-sky-300/40 hover:bg-sky-300/10"
-                  >
-                    {openingAnalysis.exit_ply ? "View exit" : "View line"}
-                  </button>
-                </div>
               </div>
-            ) : null}
+            )}
             <div className="min-h-0 flex-1" data-component="analysis-move-history">
               <MoveHistory
                 moves={moves}
@@ -1053,9 +1090,7 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold">Engine suggestions</h2>
             </div>
-            <div
-              className={`mt-3 space-y-2 transition-opacity duration-200 ${isStale || isAnalyzing ? "opacity-60" : "opacity-100"}`}
-            >
+            <div className="mt-3 space-y-2">
               {[0, 1, 2].map((index) => {
                 const move = panelMoves[index];
                 return (
