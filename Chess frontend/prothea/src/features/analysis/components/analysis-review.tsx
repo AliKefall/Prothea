@@ -217,10 +217,12 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     if (!playedMove || (!variationMove && moveNumber === 0)) return null;
 
     const beforeFen = variationMove
-      ? variationMoves.slice(0, -1).reduce<string | null>(
-          (fen, move) => (fen ? applyMove(fen, move) : null),
-          currentFen,
-        ) ?? currentFen
+      ? (variationMoves
+          .slice(0, -1)
+          .reduce<
+            string | null
+          >((fen, move) => (fen ? applyMove(fen, move) : null), currentFen) ??
+        currentFen)
       : moveNumber === 1
         ? INITIAL_FEN
         : (moves[moveNumber - 2]?.fen_after ?? INITIAL_FEN);
@@ -240,10 +242,8 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     ],
     [moveNumber, moves, variationMoves],
   );
-  const {
-    data: openingAnalysis,
-    isPlaceholderData: isOpeningAnalysisStale,
-  } = useMatchOpening(matchId, openingMoves);
+  const { data: openingAnalysis, isPlaceholderData: isOpeningAnalysisStale } =
+    useMatchOpening(matchId, openingMoves);
   const opening = openingAnalysis?.opening;
   const { data: openingCatalog = [], isLoading: isOpeningCatalogLoading } =
     useOpeningLibrary(isOpeningLibraryOpen);
@@ -265,10 +265,10 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
   const activePly = moveNumber + variationMoves.length;
   const activeMoveIsInBook = Boolean(
     activePlayedMove &&
-      openingAnalysis &&
-      !isOpeningAnalysisStale &&
-      activePly > 0 &&
-      openingAnalysis.matched_plies >= activePly,
+    openingAnalysis &&
+    !isOpeningAnalysisStale &&
+    activePly > 0 &&
+    openingAnalysis.matched_plies >= activePly,
   );
   const isWhite = match && user ? match.white_id === user.user_id : true;
   const positionGame = useMemo(
@@ -514,14 +514,20 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
 
   if (matchLoading || movesLoading) {
     return (
-      <div className="py-16 text-center text-sm text-zinc-400" data-component="analysis-loading-state">
+      <div
+        className="py-16 text-center text-sm text-zinc-400"
+        data-component="analysis-loading-state"
+      >
         Loading game…
       </div>
     );
   }
   if (matchError || !match || !user || match.result === "pending") {
     return (
-      <div className="mx-auto max-w-lg rounded-xl border border-zinc-800 bg-zinc-900 p-6 text-center text-white" data-component="analysis-unavailable-state">
+      <div
+        className="mx-auto max-w-lg rounded-xl border border-zinc-800 bg-zinc-900 p-6 text-center text-white"
+        data-component="analysis-unavailable-state"
+      >
         <p className="font-semibold">
           This game is not available for analysis.
         </p>
@@ -579,9 +585,7 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
       selectMove(targetPly);
       return;
     }
-    setVariationMoves((current) =>
-      current.slice(0, targetPly - moveNumber),
-    );
+    setVariationMoves((current) => current.slice(0, targetPly - moveNumber));
   };
 
   const openOpeningLine = (
@@ -605,8 +609,14 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
   };
 
   return (
-    <main className="mx-auto w-full max-w-6xl text-white" data-component="analysis-review">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3" data-component="analysis-header">
+    <main
+      className="mx-auto w-full max-w-6xl text-white"
+      data-component="analysis-review"
+    >
+      <div
+        className="mb-6 flex flex-wrap items-center justify-between gap-3"
+        data-component="analysis-header"
+      >
         <div>
           <Link
             href="/dashboard/analysis"
@@ -653,9 +663,15 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
         />
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]" data-component="analysis-workspace">
+      <div
+        className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]"
+        data-component="analysis-workspace"
+      >
         <section data-component="analysis-board-panel">
-          <div className="mx-auto mb-3 flex w-full max-w-3xl flex-wrap items-center justify-between gap-2" data-component="analysis-board-controls">
+          <div
+            className="mx-auto mb-3 flex w-full max-w-3xl flex-wrap items-center justify-between gap-2"
+            data-component="analysis-board-controls"
+          >
             <div className="flex min-h-7 flex-wrap items-center gap-2 text-xs text-zinc-400">
               {checkedKingSquare && (
                 <span className="rounded-full border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-red-300">
@@ -689,9 +705,15 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
               </button>
             </div>
           </div>
-          <div className="mx-auto grid w-full max-w-3xl grid-cols-[1rem_minmax(0,1fr)] items-stretch gap-3" data-component="analysis-evaluation-and-board">
+          <div
+            className="mx-auto grid w-full max-w-3xl grid-cols-[1rem_minmax(0,1fr)] items-stretch gap-3"
+            data-component="analysis-evaluation-and-board"
+          >
             <EvaluationBar move={bestMove} whiteAtBottom={isWhite} />
-            <div className="relative aspect-square w-full min-w-0 overflow-hidden rounded-lg shadow-xl" data-component="analysis-board-frame">
+            <div
+              className="relative aspect-square w-full min-w-0 overflow-hidden rounded-lg shadow-xl"
+              data-component="analysis-board-frame"
+            >
               <AnalysisChessboard
                 position={displayedFen}
                 boardOrientation={boardOrientation}
@@ -724,8 +746,14 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
               )}
             </div>
           </div>
-          <div className="mx-auto mt-4 flex w-full max-w-3xl items-center justify-between gap-3" data-component="analysis-move-navigation">
-            <div className="min-w-0 flex-1 text-sm text-zinc-400" data-component="analysis-position-summary">
+          <div
+            className="mx-auto mt-4 flex w-full max-w-3xl items-center justify-between gap-3"
+            data-component="analysis-move-navigation"
+          >
+            <div
+              className="min-w-0 flex-1 text-sm text-zinc-400"
+              data-component="analysis-position-summary"
+            >
               <p className="truncate">
                 {variationMoves.length > 0
                   ? `Exploring: ${variationMoves.map((move) => move.san).join(" ")}`
@@ -753,7 +781,11 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
                   if (selectedOpening) setVariationMoves([]);
                   else selectMove(0);
                 }}
-                disabled={selectedOpening ? variationMoves.length === 0 : moveNumber === 0 && variationMoves.length === 0}
+                disabled={
+                  selectedOpening
+                    ? variationMoves.length === 0
+                    : moveNumber === 0 && variationMoves.length === 0
+                }
                 className="rounded-md border border-zinc-700 px-3 py-2 text-sm disabled:opacity-40"
               >
                 First
@@ -777,7 +809,11 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
                     selectMove(Math.min(moves.length, moveNumber + 1));
                   }
                 }}
-                disabled={selectedOpening ? variationMoves.length >= selectedOpening.moves.length : moveNumber >= moves.length || variationMoves.length > 0}
+                disabled={
+                  selectedOpening
+                    ? variationMoves.length >= selectedOpening.moves.length
+                    : moveNumber >= moves.length || variationMoves.length > 0
+                }
                 className="rounded-md border border-zinc-700 px-3 py-2 text-sm disabled:opacity-40"
               >
                 Next
@@ -791,7 +827,11 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
                     selectMove(moves.length);
                   }
                 }}
-                disabled={selectedOpening ? variationMoves.length >= selectedOpening.moves.length : moveNumber >= moves.length}
+                disabled={
+                  selectedOpening
+                    ? variationMoves.length >= selectedOpening.moves.length
+                    : moveNumber >= moves.length
+                }
                 className="rounded-md border border-zinc-700 px-3 py-2 text-sm disabled:opacity-40"
               >
                 Last
@@ -861,8 +901,14 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
           )}
         </section>
 
-        <aside className="flex h-[80vh] min-h-128 max-h-208 flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900" data-component="analysis-sidebar">
-          <section className="flex min-h-0 flex-1 flex-col" data-component="analysis-move-history-panel">
+        <aside
+          className="flex h-[80vh] min-h-128 max-h-208 flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900"
+          data-component="analysis-sidebar"
+        >
+          <section
+            className="flex min-h-0 flex-1 flex-col"
+            data-component="analysis-move-history-panel"
+          >
             <div className="shrink-0 border-b border-zinc-800 px-5 py-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -961,10 +1007,14 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
                       {visibleOpenings.length < filteredOpenings.length && (
                         <button
                           type="button"
-                          onClick={() => setOpeningResultLimit((limit) => limit + 50)}
+                          onClick={() =>
+                            setOpeningResultLimit((limit) => limit + 50)
+                          }
                           className="mt-2 w-full rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800"
                         >
-                          Show more ({filteredOpenings.length - visibleOpenings.length} remaining)
+                          Show more (
+                          {filteredOpenings.length - visibleOpenings.length}{" "}
+                          remaining)
                         </button>
                       )}
                     </>
@@ -973,7 +1023,10 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
               </section>
             )}
             {selectedOpening ? (
-              <div className="mx-4 my-3 h-44 shrink-0 overflow-y-auto overscroll-contain rounded-xl border border-sky-400/20 bg-linear-to-br from-sky-400/8 to-zinc-900 px-4 py-3 text-zinc-400" data-component="selected-opening-line">
+              <div
+                className="mx-4 my-3 h-44 shrink-0 overflow-y-auto overscroll-contain rounded-xl border border-sky-400/20 bg-linear-to-br from-sky-400/8 to-zinc-900 px-4 py-3 text-zinc-400"
+                data-component="selected-opening-line"
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-zinc-100">
@@ -993,21 +1046,31 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
                     <XMarkIcon className="h-4 w-4" />
                   </button>
                 </div>
-                <ol className="mt-3 flex flex-wrap gap-1.5" aria-label={`${selectedOpening.name} moves`}>
+                <ol
+                  className="mt-3 flex flex-wrap gap-1.5"
+                  aria-label={`${selectedOpening.name} moves`}
+                >
                   {selectedOpening.moves.map((move, index) => (
                     <li key={`${move.uci}-${index}`}>
                       <button
                         type="button"
                         onClick={() => {
-                          setVariationMoves(selectedOpening.moves.slice(0, index + 1));
+                          setVariationMoves(
+                            selectedOpening.moves.slice(0, index + 1),
+                          );
                           setSelectedSquare(null);
                           setPromotionRequest(null);
                         }}
                         aria-label={`Show ${selectedOpening.name} through ${move.san}`}
-                        aria-current={variationMoves.length === index + 1 ? "step" : undefined}
+                        aria-current={
+                          variationMoves.length === index + 1
+                            ? "step"
+                            : undefined
+                        }
                         className={`rounded-md px-2 py-1 font-mono text-xs transition ${variationMoves.length === index + 1 ? "bg-sky-300 text-zinc-950" : "bg-zinc-800 text-zinc-200 hover:bg-sky-300/20 hover:text-sky-100"}`}
                       >
-                        {Math.floor(index / 2) + 1}{index % 2 === 0 ? "." : "…"} {move.san}
+                        {Math.floor(index / 2) + 1}
+                        {index % 2 === 0 ? "." : "…"} {move.san}
                       </button>
                     </li>
                   ))}
@@ -1016,7 +1079,10 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
             ) : (
               // Sabit yükseklikli kutu: hamle yapıldıkça içerik değişse de
               // altındaki hamle listesi aşağı yukarı kaymaz.
-              <div className="mx-4 my-3 h-44 shrink-0 overflow-y-auto overscroll-contain rounded-xl border border-sky-400/15 bg-linear-to-br from-sky-400/6 to-zinc-900 px-4 py-3 text-zinc-400" data-component="opening-summary">
+              <div
+                className="mx-4 my-3 h-44 shrink-0 overflow-y-auto overscroll-contain rounded-xl border border-sky-400/15 bg-linear-to-br from-sky-400/6 to-zinc-900 px-4 py-3 text-zinc-400"
+                data-component="opening-summary"
+              >
                 {openingMoves.length === 0 ? (
                   <p className="text-sm text-zinc-500">
                     Opening line appears after the first move.
@@ -1028,16 +1094,22 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
                     </p>
                     {openingLine.length > 0 && (
                       <>
-                        <ol className="mt-3 flex flex-wrap gap-1.5" aria-label={`${opening?.name ?? "Opening"} moves`}>
+                        <ol
+                          className="mt-3 flex flex-wrap gap-1.5"
+                          aria-label={`${opening?.name ?? "Opening"} moves`}
+                        >
                           {openingLine.map((move, index) => (
                             <li key={`${move.uci}-${index}`}>
                               <button
                                 type="button"
-                                onClick={() => openOpeningLine(openingLine, index + 1)}
+                                onClick={() =>
+                                  openOpeningLine(openingLine, index + 1)
+                                }
                                 aria-label={`Show opening through ${move.san}`}
                                 className="rounded-md bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-200 transition hover:bg-sky-300/20 hover:text-sky-100"
                               >
-                                {Math.floor(index / 2) + 1}{index % 2 === 0 ? "." : "…"} {move.san}
+                                {Math.floor(index / 2) + 1}
+                                {index % 2 === 0 ? "." : "…"} {move.san}
                               </button>
                             </li>
                           ))}
@@ -1072,7 +1144,10 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
                 )}
               </div>
             )}
-            <div className="min-h-0 flex-1" data-component="analysis-move-history">
+            <div
+              className="min-h-0 flex-1"
+              data-component="analysis-move-history"
+            >
               <MoveHistory
                 moves={moves}
                 isLoading={false}
@@ -1140,7 +1215,11 @@ function RatingChange({
         ? "text-emerald-400"
         : "text-rose-400";
   return (
-    <div className="flex items-center justify-between gap-3" data-component="rating-change" data-player-color={color.toLowerCase()}>
+    <div
+      className="flex items-center justify-between gap-3"
+      data-component="rating-change"
+      data-player-color={color.toLowerCase()}
+    >
       <span className="text-zinc-400">
         {color} · {username}
       </span>
@@ -1191,6 +1270,7 @@ function EvaluationBar({
       aria-label={"Position evaluation: " + label}
       data-component="analysis-evaluation-bar"
     >
+      sadece görüntü
       <div
         className="relative h-full min-h-0 w-4 overflow-hidden rounded-full border border-zinc-700 bg-zinc-950"
         role="meter"
