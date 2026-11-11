@@ -154,7 +154,6 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     playedUci: string;
     qualityKey: string;
     whiteMoved: boolean;
-    // Önce oynanan sonrası pozisyon (ekranda gösterilen), sonra öncesi analiz edilir.
     phase: "after" | "before";
     bestAfter?: EngineMove;
   };
@@ -275,10 +274,8 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     () => createPosition(displayedFen),
     [displayedFen],
   );
-  const { analyze, result, isAnalyzing, error } = useStockfish();
+  const { analyze, result, resultsByFen, isAnalyzing, error } = useStockfish();
 
-  // analyze referansı değişse bile efektlerin yeniden çalışıp motoru
-  // sürekli yeniden başlatmaması için ref üzerinden çağırıyoruz.
   const analyzeRef = useRef(analyze);
   useEffect(() => {
     analyzeRef.current = analyze;
@@ -286,18 +283,8 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
 
   const canAnalyze = Boolean(match && match.result !== "pending" && user);
 
-  // Ekranda gösterilen motor sonucu: yalnızca GÖRÜNEN pozisyon için tamamlanmış
-  // sonuç gelince güncellenir. Kalite hesabı için yapılan ara analizler
-  // (başka pozisyonlar) paneli / eval bar'ı / okları oynatmaz.
-  const [shownResult, setShownResult] = useState<typeof result | null>(null);
-  useEffect(() => {
-    if (result && !isAnalyzing && result.fen === displayedFen) {
-      setShownResult(result);
-    }
-  }, [result, isAnalyzing, displayedFen]);
+  const shownResult = resultsByFen.get(displayedFen) ?? null;
 
-  // Ana analiz efekti: sadece pozisyon / oynanan hamle değişince çalışır.
-  // Opening verisinin gelmesi artık motoru yeniden başlatmaz.
   useEffect(() => {
     if (!canAnalyze) return;
     const run = analyzeRef.current;
@@ -457,14 +444,12 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     [handleVariationMove, positionGame],
   );
 
-  // Gösterilen sonuç şu anki pozisyona ait mi? (ok / rozet / "Best" için)
   const fresh = !!shownResult && shownResult.fen === displayedFen;
 
   const panelMoves = useMemo(() => {
     if (!shownResult) return [];
     return shownResult.moves.slice(0, 3).map((move) => ({
       uci: move.uci,
-      // displayedFen değil: sonucun kendi pozisyonu kullanılır
       san:
         createMove(
           shownResult.fen,
@@ -481,9 +466,7 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
     }));
   }, [shownResult]);
 
-  // Eval bar ve panel: yeni sonuç gelene kadar eski değer kalır (sıçrama/boşalma yok)
   const bestMove = shownResult?.moves[0];
-  // Tahta okları/rozetleri sadece güncel pozisyonun sonucuyla
   const bestUci = fresh ? shownResult?.moves[0]?.uci : undefined;
   const bestFrom = bestUci?.slice(0, 2);
   const visibleMoveQuality =
@@ -1077,8 +1060,6 @@ export function AnalysisReview({ matchId }: { matchId: string }) {
                 </ol>
               </div>
             ) : (
-              // Sabit yükseklikli kutu: hamle yapıldıkça içerik değişse de
-              // altındaki hamle listesi aşağı yukarı kaymaz.
               <div
                 className="mx-4 my-3 h-44 shrink-0 overflow-y-auto overscroll-contain rounded-xl border border-sky-400/15 bg-linear-to-br from-sky-400/6 to-zinc-900 px-4 py-3 text-zinc-400"
                 data-component="opening-summary"
@@ -1270,7 +1251,6 @@ function EvaluationBar({
       aria-label={"Position evaluation: " + label}
       data-component="analysis-evaluation-bar"
     >
-      sadece görüntü
       <div
         className="relative h-full min-h-0 w-4 overflow-hidden rounded-full border border-zinc-700 bg-zinc-950"
         role="meter"

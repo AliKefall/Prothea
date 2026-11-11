@@ -11,7 +11,7 @@ const WS_URL = API_BASE_URL.replace(/^http/, "ws");
 
 class WebSocketManager {
   private socket: WebSocket | null = null;
-  private token: string | null = null;
+  private authenticated = false;
 
   private connectionListeners = new Set<ConnectionListener>();
   private listeners = new Set<Listener>();
@@ -29,8 +29,8 @@ class WebSocketManager {
     };
   }
 
-  connect(accessToken: string) {
-    this.token = accessToken;
+  connect() {
+    this.authenticated = true;
     this.manualClose = false;
 
     if (
@@ -40,13 +40,11 @@ class WebSocketManager {
       return;
     }
 
-    const url = `${WS_URL}/ws?token=${encodeURIComponent(accessToken)}`;
+    const url = `${WS_URL}/ws`;
 
     this.socket = new WebSocket(url);
 
     this.socket.onopen = () => {
-      console.log("WebSocket connected");
-
       this.reconnectAttempt = 0;
       this.reconnectTimer = undefined;
 
@@ -60,26 +58,15 @@ class WebSocketManager {
     };
 
     this.socket.onmessage = (event) => {
-      console.log("[websocket] RAW:", event.data);
-
       try {
         const message = JSON.parse(event.data) as WebSocketMessage;
-
-        console.log("[websocket] PARSED:", message);
-
         this.emit(message);
       } catch (error) {
         console.error("Failed to parse WebSocket message:", error);
       }
     };
 
-    this.socket.onclose = (event) => {
-      console.log("WebSocket closed", {
-        code: event.code,
-        reason: event.reason,
-        wasClean: event.wasClean,
-      });
-
+    this.socket.onclose = () => {
       this.socket = null;
 
       if (!this.manualClose) {
@@ -110,7 +97,7 @@ class WebSocketManager {
       this.reconnectTimer = undefined;
     }
 
-    this.token = null;
+    this.authenticated = false;
 
     if (this.socket) {
       this.socket.close(1000, "logout");
@@ -150,7 +137,7 @@ class WebSocketManager {
   }
 
   private scheduleReconnect() {
-    if (this.manualClose || !this.token || this.reconnectTimer !== undefined) {
+    if (this.manualClose || !this.authenticated || this.reconnectTimer !== undefined) {
       return;
     }
     // This part is synchronized with the games reconnect system.
@@ -161,8 +148,8 @@ class WebSocketManager {
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = undefined;
 
-      if (!this.manualClose && this.token) {
-        this.connect(this.token);
+      if (!this.manualClose && this.authenticated) {
+        this.connect();
       }
     }, delay);
   }

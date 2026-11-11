@@ -35,8 +35,6 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 		deps.Hub.SetMetrics(observability)
 	}
 
-	log.Printf("Allowed origins: %#v", config.AllowedOrigins)
-
 	router.Use(metrics.Middleware(observability))
 	router.Use(httpRequestLogMiddleware)
 	router.Use(middleware.RequestID)
@@ -53,7 +51,7 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 		log.Fatalf("Authentication rate limiter init failed: %v", err)
 	}
 
-	router.With(deps.AuthMiddleware).Get("/ws", func(w http.ResponseWriter, r *http.Request) {
+	router.With(authOriginMiddleware(config.AllowedOrigins), deps.AuthMiddleware).Get("/ws", func(w http.ResponseWriter, r *http.Request) {
 		uid, ok := r.Context().Value(endpoints.UserIDKey).(uuid.UUID)
 		if !ok || uid == uuid.Nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, "websocket_error", "Invalid user context", "", nil)
@@ -91,7 +89,6 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 		pr.Get("/profile", deps.ProfileHandler)
 		pr.Get("/players/search", deps.SearchPlayersHandler)
 		pr.Get("/players/{username}", deps.PlayerProfileHandler)
-		pr.Post("/logout", deps.LogoutHandler)
 		pr.Get("/friends", deps.HandleListFriends)
 		pr.Get("/friends/requests", deps.HandleListFriendRequests)
 		pr.Post("/friends/requests", deps.HandleSendFriendRequest)
@@ -127,6 +124,7 @@ func newRouter(config *ServerConfig, deps *endpoints.Deps) http.Handler {
 		ar.Post("/register", deps.RegisterHandler)
 		ar.Post("/login", deps.LoginHandler)
 		ar.Post("/refresh", deps.RefreshHandler)
+		ar.With(deps.AuthMiddleware).Post("/logout", deps.LogoutHandler)
 	})
 
 	return router
@@ -167,8 +165,6 @@ func securityHeaderMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// Helpers for logging
-// NOTE: later this can be carried over to prometheus. absolutely not now.
 func requestIDResponseHeaderMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if requestID := middleware.GetReqID(r.Context()); requestID != "" {

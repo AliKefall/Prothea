@@ -20,11 +20,22 @@ type JWTManager struct {
 	expiresIn time.Duration
 }
 
-func NewJWTManager(secret string, expiresIn time.Duration) *JWTManager {
+const (
+	issuer   = "Ganymede"
+	audience = "prothea-api"
+)
+
+func NewJWTManager(secret string, expiresIn time.Duration) (*JWTManager, error) {
+	if len(secret) < 32 {
+		return nil, errors.New("JWT_SECRET must contain at least 32 bytes of cryptographically random data")
+	}
+	if expiresIn <= 0 {
+		return nil, errors.New("access token lifetime must be positive")
+	}
 	return &JWTManager{
 		secret:    []byte(secret),
 		expiresIn: expiresIn,
-	}
+	}, nil
 }
 
 func (j *JWTManager) Generate(userID string, sessionID string) (string, error) {
@@ -32,8 +43,9 @@ func (j *JWTManager) Generate(userID string, sessionID string) (string, error) {
 		UserID:    userID,
 		SessionID: sessionID,
 		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    "Ganymede",
+			Issuer:    issuer,
 			Subject:   userID,
+			Audience:  jwt.ClaimStrings{audience},
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(j.expiresIn)),
 		},
@@ -43,21 +55,24 @@ func (j *JWTManager) Generate(userID string, sessionID string) (string, error) {
 }
 
 func (j *JWTManager) Verify(tokenStr string) (*Claims, error) {
-	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (any, error) {
-		_, ok := t.Method.(*jwt.SigningMethodHMAC)
-		if !ok {
-			return nil, errors.New("Unexpected signing method")
+	if len(tokenStr) == 0 || len(tokenStr) > 4096 {
+		return nil, errors.New("invalid token size")
+	}
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) {
+		if t.Method != jwt.SigningMethodHS256 {
+			return nil, errors.New("unexpected signing method")
 		}
 		return j.secret, nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithIssuer(issuer), jwt.WithAudience(audience), jwt.WithExpirationRequired(), jwt.WithIssuedAt())
 	if err != nil {
 		return nil, err
 	}
-	claims, ok := token.Claims.(*Claims)
-	if !ok || !token.Valid {
+	parsedClaims, ok := token.Claims.(*Claims)
+	if !ok || !token.Valid || parsedClaims.UserID == "" || parsedClaims.SessionID == "" || parsedClaims.Subject != parsedClaims.UserID || parsedClaims.IssuedAt == nil {
 		return nil, errors.New("Invalid token")
 	}
-	return claims, nil
+	return parsedClaims, nil
 }
 
 func MakeRefreshToken() (string, error) {

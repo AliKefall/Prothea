@@ -28,6 +28,10 @@ type serverDependencies struct {
 }
 
 func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
+	jwtManager, err := auth.NewJWTManager(config.JWTSecret, 15*time.Minute)
+	if err != nil {
+		log.Fatalf("JWT configuration invalid: %v", err)
+	}
 	conn := mustOpenDatabase(config)
 	queries := database.New(conn)
 
@@ -53,7 +57,7 @@ func bootstrapServer(config *ServerConfig) (*sql.DB, serverDependencies) {
 		RedisClient:       redisClient,
 		LoginSessionStore: redisClient,
 		Hasher:            auth.NewPasswordHasher(),
-		JWT:               auth.NewJWTManager(config.JWTSecret, 15*time.Minute),
+		JWT:               jwtManager,
 		Friends:           friendsService,
 		Matchmaking:       matchmakingService,
 		Hub:               hub,

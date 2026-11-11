@@ -218,6 +218,7 @@ func (deps *Deps) LoginHandler(w http.ResponseWriter, r *http.Request) {
 			MaxAge:   int(refreshTTL.Seconds()),
 		},
 	)
+	setAccessTokenCookie(w, r, accessToken)
 
 	utils.RespondWithJSON(
 		w,

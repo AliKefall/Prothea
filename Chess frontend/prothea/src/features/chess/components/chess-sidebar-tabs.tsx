@@ -34,7 +34,6 @@ export function ChessSidebarTabs({
   onChange,
 }: ChessSidebarTabsProps) {
   return (
-    // FIX #7: proper tab semantics (tablist / tab / aria-selected) instead of aria-pressed
     <div role="tablist" className="flex overflow-x-auto border-b border-zinc-800">
       {tabs.map((tab) => {
         if (tab.id === "matchmaking" && !showMatchmaking) {

@@ -16,8 +16,6 @@ var (
 	ErrCannotMessageSelf  = errors.New("cannot send message to yourself")
 )
 
-
-//NOTE: Sanitize messages much better.
 const MaxMessageLength = 500
 
 func (s *Service) SendMessage(

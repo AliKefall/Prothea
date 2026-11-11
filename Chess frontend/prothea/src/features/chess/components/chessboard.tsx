@@ -1,6 +1,5 @@
 "use client";
 
-// FIX #3: removed unused `useRef` import
 import { memo, useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Chess, type Square } from "chess.js";
 import { Chessboard, type PieceDropHandlerArgs } from "react-chessboard";
@@ -21,7 +20,6 @@ import MatchmakingPanel from "@/features/matchmaking/components/matchmaking-pane
 import { useMatchmakingStore } from "@/features/matchmaking/store/matchmaking-store";
 import { INITIAL_FEN } from "@/features/analysis/lib/position";
 
-// NOTE: Tidy up this place.
 interface ChessBoardProps {
   matchId: string;
 }
@@ -203,7 +201,6 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
   const { data: movesData, isLoading: isMovesLoading } = useMatchMoves(matchId);
 
   const [liveMoves, setLiveMoves] = useState<GameMove[]>([]);
-  // FIX #4: `livePosition` and `clockSnapshot` states removed. Both duplicated data
   // already derived from `moves`, and could go stale after a refetch.
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [gameFinished, setGameFinished] = useState(false);
@@ -212,7 +209,6 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
   );
   const [drawOfferSent, setDrawOfferSent] = useState(false);
   const [drawOfferReceived, setDrawOfferReceived] = useState(false);
-  // FIX #2: typed state so it matches ChessSidebar's `ChessSidebarTab` prop
   const [activeTab, setActiveTab] = useState<ChessSidebarTab>("moves");
   const [promotionRequest, setPromotionRequest] = useState<{
     from: string;
@@ -412,7 +408,6 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
 
         queryClient.setQueryData(
           ["match", matchId],
-          // FIX #5: renamed param (it shadowed the later `currentMatch` const)
           (previousMatch: typeof match) => {
             if (!previousMatch) {
               return previousMatch;
@@ -807,7 +802,6 @@ export function ChessBoard({ matchId }: ChessBoardProps) {
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-zinc-950 p-6 text-white aspect-square">
       <div className="mx-auto flex min-h-[calc(100vh-7rem)] w-full max-w-6xl items-start justify-center pt-2">
-        {/* FIX #1: ChessWorkspace expects `board` and `sidebar` props, not children */}
         <ChessWorkspace
           board={
             <div className="flex min-w-0 flex-col items-center self-start">

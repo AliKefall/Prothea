@@ -10,7 +10,7 @@ export function useLogin() {
     mutationFn: login,
     onSuccess: (data) => {
       setSession(data.access_token, data.user);
-      websocketManager.connect(data.access_token);
+      websocketManager.connect();
     },
   });
 }

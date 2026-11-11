@@ -71,9 +71,6 @@ export function refreshSession(): Promise<RefreshResponse> {
 }
 
 
-/* Alos if refresh endpoints throws another race condition
- * Change the backend for another algorithm
- */
 http.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const token = useAuthStore.getState().accessToken;
 

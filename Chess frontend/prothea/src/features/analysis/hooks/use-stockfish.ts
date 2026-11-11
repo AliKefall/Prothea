@@ -22,6 +22,9 @@ export function useStockfish() {
   const startupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const analysisTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [state, setState] = useState<AnalysisState>({ result: null, isAnalyzing: false, error: null });
+  const [resultsByFen, setResultsByFen] = useState<Map<string, AnalysisResult>>(
+    () => new Map(),
+  );
 
   useEffect(() => {
     const worker = new Worker(ENGINE_URL);
@@ -103,6 +106,7 @@ export function useStockfish() {
       };
       activeRef.current = null;
       linesRef.current.clear();
+      setResultsByFen((current) => new Map(current).set(result.fen, result));
       setState({ result, isAnalyzing: false, error: null });
     };
 
@@ -144,7 +148,6 @@ export function useStockfish() {
     }
 
     const request = { fen, options };
-    // Eski sonucu silme: panel boşalıp tekrar dolmasın
     setState((current) => ({ result: current.result, isAnalyzing: true, error: null }));
     if (!readyRef.current) {
       pendingRef.current = request;
@@ -176,14 +179,22 @@ export function useStockfish() {
 
   const clear = useCallback(() => {
     setState({ result: null, isAnalyzing: false, error: null });
+    setResultsByFen(new Map());
   }, []);
 
-  return { result: state.result, isAnalyzing: state.isAnalyzing, error: state.error, analyze, stop, clear };
+  return {
+    result: state.result,
+    resultsByFen,
+    isAnalyzing: state.isAnalyzing,
+    error: state.error,
+    analyze,
+    stop,
+    clear,
+  };
 }
 
 function parseInfoLine(line: string, fen: string): { multiPv: number; move: EngineMove } | null {
   const tokens = line.trim().split(/\s+/);
-  // lowerbound/upperbound satırları değerlendirmenin sıçramasına yol açar
   if (tokens.includes("lowerbound") || tokens.includes("upperbound")) return null;
   const depth = readInteger(tokens, "depth");
   const multiPv = readInteger(tokens, "multipv") ?? 1;

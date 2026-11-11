@@ -25,7 +25,7 @@ export function useFriendsWebSocket() {
       return;
     }
 
-    websocketManager.connect(accessToken);
+    websocketManager.connect();
 
     return websocketManager.subscribe((message) => {
       const payload = message.payload as FriendEventPayload;

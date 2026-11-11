@@ -10,7 +10,11 @@ import (
 )
 
 func TestAuthMiddlewareRejectsMissingAndInvalidTokens(t *testing.T) {
-	deps := &Deps{JWT: auth.NewJWTManager("test-secret", time.Minute)}
+	manager, err := auth.NewJWTManager("01234567890123456789012345678901", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := &Deps{JWT: manager}
 	nextCalled := false
 	handler := deps.AuthMiddleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { nextCalled = true }))
 	for _, token := range []string{"", "not-a-jwt"} {

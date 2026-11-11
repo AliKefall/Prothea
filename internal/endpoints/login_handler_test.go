@@ -136,12 +136,16 @@ func newLoginTestDeps(t *testing.T, config loginDBConfig, store *loginRedisStore
 		t.Fatalf("sql.Open() error = %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+	manager, err := auth.NewJWTManager("01234567890123456789012345678901", time.Minute)
+	if err != nil {
+		t.Fatalf("NewJWTManager() error = %v", err)
+	}
 	return &Deps{
 		DB:                db,
 		Queries:           database.New(db),
 		LoginSessionStore: store,
 		Hasher:            auth.NewPasswordHasher(),
-		JWT:               auth.NewJWTManager("login-test-secret", time.Minute),
+		JWT:               manager,
 	}
 }
 

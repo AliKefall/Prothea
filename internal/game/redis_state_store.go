@@ -12,11 +12,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-//NOTE: There is a huge problem in here which you will see in prod
-// This whole system is an open source for race condition, depending
-// on the scale of this project add any of the these three ways.
-// 1- redis transaction/lua, optimistic locking or something similar
-
 const (
 	gameStateKeyPrefix = "game:state:"
 	gameTimeoutKey     = "game:timeouts"
@@ -47,7 +42,7 @@ func (s *RedisStateStore) Get(
 	matchID uuid.UUID,
 ) (*State, error) {
 	if s == nil || s.client == nil {
-		return nil, errors.New("redis client is full")
+		return nil, errors.New("redis client is nil")
 	}
 
 	data, err := s.client.Get(

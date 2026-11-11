@@ -6,7 +6,10 @@ import (
 )
 
 func TestJWTManagerGenerateAndVerify(t *testing.T) {
-	manager := NewJWTManager("test-secret", time.Minute)
+	manager, err := NewJWTManager("01234567890123456789012345678901", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
 	token, err := manager.Generate("user-id", "session-id")
 	if err != nil {
 		t.Fatalf("Generate() error = %v", err)
@@ -21,7 +24,11 @@ func TestJWTManagerGenerateAndVerify(t *testing.T) {
 }
 
 func TestJWTManagerRejectsInvalidToken(t *testing.T) {
-	if _, err := NewJWTManager("test-secret", time.Minute).Verify("invalid.token.value"); err == nil {
+	manager, err := NewJWTManager("01234567890123456789012345678901", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Verify("invalid.token.value"); err == nil {
 		t.Fatal("Verify() accepted an invalid token")
 	}
 }

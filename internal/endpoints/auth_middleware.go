@@ -25,28 +25,21 @@ const (
 func (deps *Deps) AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, err := auth.GetBearer(r.Header)
-		if err != nil {
-			// Fallback for websocket clients
-			token = r.URL.Query().Get("token")
-
-			if token == "" {
-				utils.RespondWithError(w, http.StatusUnauthorized, "token_error", "missing token", "", nil)
-				return
+		if err != nil && r.URL.Path == "/ws" {
+			if cookie, cookieErr := r.Cookie("access_token"); cookieErr == nil {
+				token = cookie.Value
+				err = nil
 			}
-
+		}
+		if err != nil || token == "" {
+			utils.RespondWithError(w, http.StatusUnauthorized, "token_error", "missing token", "", nil)
+			return
 		}
 		ctx := r.Context()
 
 		claims, err := deps.JWT.Verify(token)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, "token_error", "invalid token", "", nil)
-			return
-		}
-
-		blackKey := "bl:" + token
-		exists, err := deps.RedisClient.Exists(ctx, blackKey).Result()
-		if err == nil && exists == 1 {
-			utils.RespondWithError(w, http.StatusUnauthorized, "token_error", "token revoked", "", nil)
 			return
 		}
 
@@ -64,22 +57,27 @@ func (deps *Deps) AuthMiddleware(next http.Handler) http.Handler {
 
 		now := time.Now().UTC()
 
+		if session.UserID.String() != claims.UserID {
+			utils.RespondWithError(w, http.StatusUnauthorized, "session_error", "session user mismatch", "", nil)
+			return
+		}
+
 		if session.RevokedAt.Valid {
 			utils.RespondWithError(w, http.StatusUnauthorized, "session_error", "session revoked", "", nil)
 			return
 		}
 
-		if now.After(session.ExpiresAt) {
+		if !now.Before(session.ExpiresAt) {
 			utils.RespondWithError(w, http.StatusUnauthorized, "session_error", "session expired", "", nil)
 			return
 		}
 
-		if now.After(session.MaxExpiresAt) {
+		if !now.Before(session.MaxExpiresAt) {
 			utils.RespondWithError(w, http.StatusUnauthorized, "session_error", "session lifetime exceeded", "", nil)
 			return
 		}
 
-		go func(sessionID uuid.UUID) {
+		go func(sessionID uuid.UUID, lastUsed time.Time) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 
@@ -87,11 +85,11 @@ func (deps *Deps) AuthMiddleware(next http.Handler) http.Handler {
 				ID: sessionID,
 				LastUsedAt: sql.NullTime{
 					Valid: true,
-					Time:  now,
+					Time:  lastUsed,
 				},
 			})
 
-		}(session.ID)
+		}(session.ID, now)
 
 		ctx = context.WithValue(ctx, UserIDKey, session.UserID)
 		ctx = context.WithValue(ctx, SessionIDKey, session.ID)

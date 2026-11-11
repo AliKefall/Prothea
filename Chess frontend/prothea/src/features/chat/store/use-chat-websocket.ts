@@ -25,7 +25,7 @@ export function useChatWebSocket() {
       return;
     }
 
-    websocketManager.connect(accessToken);
+    websocketManager.connect();
 
     const unsubscribe = websocketManager.subscribe(
       (message) => {

@@ -19,7 +19,7 @@ export function useMatchmakingWebSocket() {
       return;
     }
 
-    websocketManager.connect(accessToken);
+    websocketManager.connect();
 
     const unsubscribe = websocketManager.subscribe((message) => {
       if (message.type !== MATCH_FOUND_EVENT) {

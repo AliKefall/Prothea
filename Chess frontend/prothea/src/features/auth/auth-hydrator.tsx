@@ -9,15 +9,13 @@ export function AuthHydrator() {
 
     useEffect(() => {
         hydrate();
-        if (useAuthStore.getState().user) {
-            void refreshSession()
-                .then(({ access_token, user }) => {
-                    useAuthStore.getState().setSession(access_token, user);
-                })
-                .catch(() => {
-                    useAuthStore.getState().clearSession();
-                });
-        }
+        void refreshSession()
+            .then(({ access_token, user }) => {
+                useAuthStore.getState().setSession(access_token, user);
+            })
+            .catch(() => {
+                useAuthStore.getState().clearSession();
+            });
     }, [hydrate]);
 
     return null

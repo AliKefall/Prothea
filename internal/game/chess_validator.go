@@ -37,13 +37,6 @@ func (v *ChessValidator) Validate(
 		promotion,
 	)
 
-	/*
-	 * Hamleyi uygulamadan önce mevcut pozisyonu
-	 * saklıyoruz.
-	 *
-	 * SAN encoder hamleyi bu pozisyona göre
-	 * hesaplıyor.
-	 */
 	previousPosition := game.Position()
 
 	if err := game.PushNotationMove(
@@ -60,7 +53,6 @@ func (v *ChessValidator) Validate(
 	}
 
 	lastMove := moves[len(moves)-1]
-
 
 	san := chess.AlgebraicNotation{}.Encode(
 		previousPosition,

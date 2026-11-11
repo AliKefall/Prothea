@@ -23,6 +23,7 @@ func (deps *Deps) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 
 	cookie, err := r.Cookie("refresh_token")
 	if err != nil {
+		clearAuthCookies(w, r)
 		utils.RespondWithError(
 			w,
 			http.StatusUnauthorized,
@@ -55,7 +56,7 @@ func (deps *Deps) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if blacklisted == "1" {
-		clearRefreshToken(w, r)
+		clearAuthCookies(w, r)
 
 		utils.RespondWithError(
 			w,
@@ -91,7 +92,7 @@ func (deps *Deps) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			clearRefreshToken(w, r)
+			clearAuthCookies(w, r)
 
 			utils.RespondWithError(
 				w,
@@ -117,7 +118,7 @@ func (deps *Deps) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 
 	if session.RevokedAt.Valid {
-		clearRefreshToken(w, r)
+		clearAuthCookies(w, r)
 
 		utils.RespondWithError(
 			w,
@@ -131,7 +132,7 @@ func (deps *Deps) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !now.Before(session.ExpiresAt) || !now.Before(session.MaxExpiresAt) {
-		clearRefreshToken(w, r)
+		clearAuthCookies(w, r)
 
 		utils.RespondWithError(
 			w,
@@ -260,8 +261,6 @@ func (deps *Deps) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 		"1",
 		ttl,
 	).Err(); err != nil {
-		// DB refresh başarılı olduğu için burada request'i
-		// başarısız saymıyoruz, fakat loglamalıyız.
 		log.Printf(
 			"failed to blacklist old refresh token: %v",
 			err,
@@ -300,6 +299,7 @@ func (deps *Deps) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 		Expires:  newExpires,
 		MaxAge:   int(time.Until(newExpires).Seconds()),
 	})
+	setAccessTokenCookie(w, r, accessToken)
 
 	utils.RespondWithJSON(
 		w,
@@ -313,17 +313,4 @@ func (deps *Deps) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 	)
-}
-
-func clearRefreshToken(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-		Secure:   utils.ShouldUseSecureCookie(r),
-		SameSite: http.SameSiteLaxMode,
-	})
-
 }

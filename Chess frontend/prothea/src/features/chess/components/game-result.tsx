@@ -34,7 +34,6 @@ function getResultLabel(
   return playerWon ? "You won" : "You lost";
 }
 
-// FIX #6: consistent formatting + readable fallback for reasons not listed below
 function formatReason(reason: string): string {
   switch (reason) {
     case "timeout":

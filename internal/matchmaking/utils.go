@@ -5,7 +5,6 @@ import (
 	"strconv"
 )
 
-
 func queueKey(timeControl string) string {
 	if timeControl == "" {
 		timeControl = "10+0"
@@ -13,10 +12,6 @@ func queueKey(timeControl string) string {
 	return "matchmaking:queue:" + timeControl
 }
 
-
-
-// This is kinda bad code. But it gets the job done for now
-// NOTE: Change this in production
 func parseLuaString(value any) string {
 	switch v := value.(type) {
 	case string:
